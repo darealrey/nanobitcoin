@@ -21,10 +21,16 @@ add_library(
   ${platform_sources}
   asio.hpp
   asio.cpp
+  block_sideband.hpp
+  block_sideband.cpp
+  block_type.hpp
+  block_type.cpp
+  block_uniquer.hpp
   blockbuilders.hpp
   blockbuilders.cpp
   blocks.hpp
   blocks.cpp
+  char_traits.hpp
   cli.hpp
   cli.cpp
   config.hpp
@@ -36,6 +42,8 @@ add_library(
   epoch.cpp
   errors.hpp
   errors.cpp
+  id_dispenser.hpp
+  interval.hpp
   ipc.hpp
   ipc.cpp
   ipc_client.hpp
@@ -47,19 +55,23 @@ add_library(
   lmdbconfig.cpp
   locks.hpp
   locks.cpp
-  logger_mt.hpp
+  logging.hpp
+  logging.cpp
+  logging_enums.hpp
+  logging_enums.cpp
   memory.hpp
   memory.cpp
   numbers.hpp
   numbers.cpp
+  object_stream.hpp
+  object_stream.cpp
+  object_stream_adapters.hpp
   observer_set.hpp
   optional_ptr.hpp
   processing_queue.hpp
   rate_limiting.hpp
   rate_limiting.cpp
   relaxed_atomic.hpp
-  rep_weights.hpp
-  rep_weights.cpp
   rocksdbconfig.hpp
   rocksdbconfig.cpp
   rpc_handler_interface.hpp
@@ -74,8 +86,12 @@ add_library(
   stats_enums.hpp
   stats_enums.cpp
   stream.hpp
+  thread_pool.hpp
+  thread_pool.cpp
   thread_roles.hpp
   thread_roles.cpp
+  thread_runner.hpp
+  thread_runner.cpp
   threading.hpp
   threading.cpp
   timer.hpp
@@ -84,6 +100,7 @@ add_library(
   tlsconfig.cpp
   tomlconfig.hpp
   tomlconfig.cpp
+  uniquer.hpp
   utility.hpp
   utility.cpp
   walletconfig.hpp
@@ -92,26 +109,25 @@ add_library(
   work.cpp)
 
 include_directories(${CMAKE_SOURCE_DIR}/submodules)
-include_directories(${CMAKE_SOURCE_DIR}/submodules/cpptoml/include)
 include_directories(
   ${CMAKE_SOURCE_DIR}/submodules/nano-pow-server/deps/cpptoml/include)
 
 target_link_libraries(
   nano_lib
-  ed25519
+  ipc_flatbuffers_lib
   crypto_lib
   blake2
-  secure
-  ipc_flatbuffers_lib
   ${CRYPTOPP_LIBRARY}
   ${CMAKE_DL_LIBS}
+  fmt::fmt
+  spdlog::spdlog
+  Boost::iostreams
   Boost::asio
   Boost::circular_buffer
   Boost::dll
-  Boost::log_setup
-  Boost::log
   Boost::multiprecision
   Boost::program_options
+  Boost::property_tree
   Boost::stacktrace)
 
 if(NANO_STACKTRACE_BACKTRACE)

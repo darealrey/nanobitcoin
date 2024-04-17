@@ -2,8 +2,9 @@
 #include <nano/crypto_lib/random_pool.hpp>
 #include <nano/lib/cli.hpp>
 #include <nano/lib/errors.hpp>
+#include <nano/lib/logging.hpp>
 #include <nano/lib/rpcconfig.hpp>
-#include <nano/lib/threading.hpp>
+#include <nano/lib/thread_runner.hpp>
 #include <nano/lib/tlsconfig.hpp>
 #include <nano/lib/tomlconfig.hpp>
 #include <nano/lib/utility.hpp>
@@ -25,13 +26,18 @@
 
 namespace
 {
+nano::logger logger{ "wallet_daemon" };
+
 void show_error (std::string const & message_a)
 {
+	logger.critical (nano::log::type::daemon, "{}", message_a);
+
 	QMessageBox message (QMessageBox::Critical, "Error starting Nano", message_a.c_str ());
 	message.setModal (true);
 	message.show ();
 	message.exec ();
 }
+
 void show_help (std::string const & message_a)
 {
 	QMessageBox message (QMessageBox::NoIcon, "Help", "see <a href=\"https://docs.nano.org/commands/command-line-interface/#launch-options\">launch options</a> ");
@@ -41,7 +47,7 @@ void show_help (std::string const & message_a)
 	message.exec ();
 }
 
-nano::error write_wallet_config (nano::wallet_config & config_a, boost::filesystem::path const & data_path_a)
+nano::error write_wallet_config (nano::wallet_config & config_a, std::filesystem::path const & data_path_a)
 {
 	nano::tomlconfig wallet_config_toml;
 	auto wallet_path (nano::get_qtwallet_toml_config_path (data_path_a));
@@ -52,11 +58,11 @@ nano::error write_wallet_config (nano::wallet_config & config_a, boost::filesyst
 	return wallet_config_toml.get_error ();
 }
 
-nano::error read_wallet_config (nano::wallet_config & config_a, boost::filesystem::path const & data_path_a)
+nano::error read_wallet_config (nano::wallet_config & config_a, std::filesystem::path const & data_path_a)
 {
 	nano::tomlconfig wallet_config_toml;
 	auto wallet_path (nano::get_qtwallet_toml_config_path (data_path_a));
-	if (!boost::filesystem::exists (wallet_path))
+	if (!std::filesystem::exists (wallet_path))
 	{
 		write_wallet_config (config_a, data_path_a);
 	}
@@ -66,12 +72,16 @@ nano::error read_wallet_config (nano::wallet_config & config_a, boost::filesyste
 }
 }
 
-int run_wallet (QApplication & application, int argc, char * const * argv, boost::filesystem::path const & data_path, nano::node_flags const & flags)
+int run_wallet (QApplication & application, int argc, char * const * argv, std::filesystem::path const & data_path, nano::node_flags const & flags)
 {
+	nano::logger::initialize (nano::log_config::daemon_default (), data_path, flags.config_overrides);
+
+	logger.info (nano::log::type::daemon_wallet, "Daemon started (wallet)");
+
 	int result (0);
 	nano_qt::eventloop_processor processor;
 	boost::system::error_code error_chmod;
-	boost::filesystem::create_directories (data_path);
+	std::filesystem::create_directories (data_path);
 	nano::set_secure_perm_directory (data_path, error_chmod);
 	QPixmap pixmap (":/logo.png");
 	auto * splash = new QSplashScreen (pixmap);
@@ -99,9 +109,6 @@ int run_wallet (QApplication & application, int argc, char * const * argv, boost
 	{
 		nano::set_use_memory_pools (config.node.use_memory_pools);
 
-		config.node.logging.init (data_path);
-		nano::logger_mt logger{ config.node.logging.min_time_between_log_output };
-
 		auto tls_config (std::make_shared<nano::tls_config> ());
 		error = nano::read_tls_config_toml (data_path, *tls_config, logger);
 		if (error)
@@ -115,17 +122,22 @@ int run_wallet (QApplication & application, int argc, char * const * argv, boost
 			config.node.websocket_config.tls_config = tls_config;
 		}
 
-		boost::asio::io_context io_ctx;
+		std::shared_ptr<boost::asio::io_context> io_ctx = std::make_shared<boost::asio::io_context> ();
+
 		nano::thread_runner runner (io_ctx, config.node.io_threads);
 
 		std::shared_ptr<nano::node> node;
 		std::shared_ptr<nano_qt::wallet> gui;
 		nano::set_application_icon (application);
-		auto opencl (nano::opencl_work::create (config.opencl_enable, config.opencl, logger, config.node.network_params.work));
-		nano::work_pool work{ config.node.network_params.network, config.node.work_threads, config.node.pow_sleep_interval, opencl ? [&opencl] (nano::work_version const version_a, nano::root const & root_a, uint64_t difficulty_a, std::atomic<int> &) {
-								 return opencl->generate_work (version_a, root_a, difficulty_a);
-							 }
-																																   : std::function<boost::optional<uint64_t> (nano::work_version const, nano::root const &, uint64_t, std::atomic<int> &)> (nullptr) };
+		auto opencl = nano::opencl_work::create (config.opencl_enable, config.opencl, logger, config.node.network_params.work);
+		nano::opencl_work_func_t opencl_work_func;
+		if (opencl)
+		{
+			opencl_work_func = [&opencl] (nano::work_version const version_a, nano::root const & root_a, uint64_t difficulty_a, std::atomic<int> &) {
+				return opencl->generate_work (version_a, root_a, difficulty_a);
+			};
+		}
+		nano::work_pool work{ config.node.network_params.network, config.node.work_threads, config.node.pow_sleep_interval, opencl_work_func };
 		node = std::make_shared<nano::node> (io_ctx, data_path, config.node, work, flags);
 		if (!node->init_error ())
 		{
@@ -163,7 +175,7 @@ int run_wallet (QApplication & application, int argc, char * const * argv, boost
 			nano::ipc::ipc_server ipc (*node, config.rpc);
 
 			std::unique_ptr<boost::process::child> rpc_process;
-			std::unique_ptr<nano::rpc> rpc;
+			std::shared_ptr<nano::rpc> rpc;
 			std::unique_ptr<nano::rpc_handler_interface> rpc_handler;
 			if (config.rpc_enable)
 			{
@@ -186,13 +198,13 @@ int run_wallet (QApplication & application, int argc, char * const * argv, boost
 				else
 				{
 					// Spawn a child rpc process
-					if (!boost::filesystem::exists (config.rpc.child_process.rpc_path))
+					if (!std::filesystem::exists (config.rpc.child_process.rpc_path))
 					{
 						throw std::runtime_error (std::string ("RPC is configured to spawn a new process however the file cannot be found at: ") + config.rpc.child_process.rpc_path);
 					}
 
 					auto network = node->network_params.network.get_current_network_as_string ();
-					rpc_process = std::make_unique<boost::process::child> (config.rpc.child_process.rpc_path, "--daemon", "--data_path", data_path, "--network", network);
+					rpc_process = std::make_unique<boost::process::child> (config.rpc.child_process.rpc_path, "--daemon", "--data_path", data_path.string (), "--network", network);
 				}
 			}
 			QObject::connect (&application, &QApplication::aboutToQuit, [&] () {
@@ -231,12 +243,17 @@ int run_wallet (QApplication & application, int argc, char * const * argv, boost
 		splash->hide ();
 		show_error ("Error deserializing config: " + error.get_message ());
 	}
+
+	logger.info (nano::log::type::daemon_wallet, "Daemon exiting (wallet)");
+
 	return result;
 }
 
 int main (int argc, char * const * argv)
 {
-	nano::set_umask ();
+	nano::set_umask (); // Make sure the process umask is set before any files are created
+	nano::logger::initialize (nano::log_config::cli_default ());
+
 	nano::node_singleton_memory_pool_purge_guard memory_pool_cleanup_guard;
 
 	QApplication application (argc, const_cast<char **> (argv));
@@ -297,11 +314,11 @@ int main (int argc, char * const * argv)
 			{
 				try
 				{
-					boost::filesystem::path data_path;
+					std::filesystem::path data_path;
 					if (vm.count ("data_path"))
 					{
 						auto name (vm["data_path"].as<std::string> ());
-						data_path = boost::filesystem::path (name);
+						data_path = std::filesystem::path (name);
 					}
 					else
 					{

@@ -1,8 +1,6 @@
 #include <nano/boost/asio/ip/address_v6.hpp>
 #include <nano/lib/tomlconfig.hpp>
 
-#include <boost/filesystem/convenience.hpp>
-
 nano::tomlconfig::tomlconfig () :
 	tree (cpptoml::make_table ())
 {
@@ -23,14 +21,14 @@ void nano::tomlconfig::doc (std::string const & key, std::string const & doc)
 	tree->document (key, doc);
 }
 
-nano::error & nano::tomlconfig::read (boost::filesystem::path const & path_a)
+nano::error & nano::tomlconfig::read (std::filesystem::path const & path_a)
 {
 	std::stringstream stream_override_empty;
 	stream_override_empty << std::endl;
 	return read (stream_override_empty, path_a);
 }
 
-nano::error & nano::tomlconfig::read (std::istream & stream_overrides, boost::filesystem::path const & path_a)
+nano::error & nano::tomlconfig::read (std::istream & stream_overrides, std::filesystem::path const & path_a)
 {
 	std::fstream stream;
 	open_or_create (stream, path_a.string ());
@@ -62,7 +60,7 @@ nano::error & nano::tomlconfig::read (std::istream & stream_first_a, std::istrea
 	return *error;
 }
 
-void nano::tomlconfig::write (boost::filesystem::path const & path_a)
+void nano::tomlconfig::write (std::filesystem::path const & path_a)
 {
 	std::fstream stream;
 	open_or_create (stream, path_a.string ());
@@ -78,7 +76,7 @@ void nano::tomlconfig::write (std::ostream & stream_a) const
 /** Open configuration file, create if necessary */
 void nano::tomlconfig::open_or_create (std::fstream & stream_a, std::string const & path_a)
 {
-	if (!boost::filesystem::exists (path_a))
+	if (!std::filesystem::exists (path_a))
 	{
 		// Create temp stream to first create the file
 		std::ofstream stream (path_a);
@@ -168,8 +166,8 @@ std::shared_ptr<cpptoml::array> nano::tomlconfig::create_array (std::string cons
 }
 
 /**
-	 * Erase keys whose values are equal to the one in \p defaults
-	 */
+ * Erase keys whose values are equal to the one in \p defaults
+ */
 void nano::tomlconfig::erase_default_values (tomlconfig & defaults_a)
 {
 	std::shared_ptr<cpptoml::table> clone = std::dynamic_pointer_cast<cpptoml::table> (tree->clone ());
@@ -188,15 +186,7 @@ void nano::tomlconfig::erase_default_values (tomlconfig & defaults_a)
 	erase_defaults (defaults_l.get_tree (), self.get_tree (), get_tree ());
 }
 
-std::string nano::tomlconfig::to_string ()
-{
-	std::stringstream ss;
-	cpptoml::toml_writer writer{ ss, "" };
-	tree->accept (writer);
-	return ss.str ();
-}
-
-std::string nano::tomlconfig::to_string_commented_entries ()
+std::string nano::tomlconfig::to_string (bool comment_values)
 {
 	std::stringstream ss, ss_processed;
 	cpptoml::toml_writer writer{ ss, "" };
@@ -204,9 +194,16 @@ std::string nano::tomlconfig::to_string_commented_entries ()
 	std::string line;
 	while (std::getline (ss, line, '\n'))
 	{
-		if (!line.empty () && line[0] != '#' && line[0] != '[')
+		if (!line.empty () && line[0] != '[')
 		{
-			line = "#" + line;
+			if (line[0] == '#') // Already commented
+			{
+				line = "\t" + line;
+			}
+			else
+			{
+				line = comment_values ? "\t# " + line : "\t" + line;
+			}
 		}
 		ss_processed << line << std::endl;
 	}

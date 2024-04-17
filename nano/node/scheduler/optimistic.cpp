@@ -1,7 +1,11 @@
+#include <nano/lib/blocks.hpp>
 #include <nano/lib/stats.hpp>
 #include <nano/lib/tomlconfig.hpp>
+#include <nano/node/active_transactions.hpp>
+#include <nano/node/election_behavior.hpp>
 #include <nano/node/node.hpp>
 #include <nano/node/scheduler/optimistic.hpp>
+#include <nano/secure/ledger.hpp>
 
 nano::scheduler::optimistic::optimistic (optimistic_config const & config_a, nano::node & node_a, nano::ledger & ledger_a, nano::active_transactions & active_a, nano::network_constants const & network_constants_a, nano::stats & stats_a) :
 	config{ config_a },
@@ -21,15 +25,15 @@ nano::scheduler::optimistic::~optimistic ()
 
 void nano::scheduler::optimistic::start ()
 {
+	debug_assert (!thread.joinable ());
+
 	if (!config.enabled)
 	{
 		return;
 	}
 
-	debug_assert (!thread.joinable ());
-
 	thread = std::thread{ [this] () {
-		nano::thread_role::set (nano::thread_role::name::optimistic_scheduler);
+		nano::thread_role::set (nano::thread_role::name::scheduler_optimistic);
 		run ();
 	} };
 }
@@ -123,13 +127,14 @@ void nano::scheduler::optimistic::run ()
 
 		if (predicate ())
 		{
-			auto transaction = ledger.store.tx_begin_read ();
+			auto transaction = ledger.tx_begin_read ();
 
 			while (predicate ())
 			{
 				debug_assert (!candidates.empty ());
 				auto candidate = candidates.front ();
 				candidates.pop_front ();
+
 				lock.unlock ();
 
 				run_one (transaction, candidate);
@@ -144,13 +149,13 @@ void nano::scheduler::optimistic::run ()
 	}
 }
 
-void nano::scheduler::optimistic::run_one (nano::transaction const & transaction, entry const & candidate)
+void nano::scheduler::optimistic::run_one (secure::transaction const & transaction, entry const & candidate)
 {
 	auto block = ledger.head_block (transaction, candidate.account);
 	if (block)
 	{
 		// Ensure block is not already confirmed
-		if (!node.block_confirmed_or_being_confirmed (block->hash ()))
+		if (!node.block_confirmed_or_being_confirmed (transaction, block->hash ()))
 		{
 			// Try to insert it into AEC
 			// We check for AEC vacancy inside our predicate
@@ -159,6 +164,15 @@ void nano::scheduler::optimistic::run_one (nano::transaction const & transaction
 			stats.inc (nano::stat::type::optimistic_scheduler, result.inserted ? nano::stat::detail::insert : nano::stat::detail::insert_failed);
 		}
 	}
+}
+
+std::unique_ptr<nano::container_info_component> nano::scheduler::optimistic::collect_container_info (const std::string & name) const
+{
+	nano::lock_guard<nano::mutex> guard{ mutex };
+
+	auto composite = std::make_unique<container_info_composite> (name);
+	composite->add_component (std::make_unique<container_info_leaf> (container_info{ "candidates", candidates.size (), sizeof (decltype (candidates)::value_type) }));
+	return composite;
 }
 
 /*

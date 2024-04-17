@@ -1,7 +1,14 @@
 #include <nano/crypto_lib/random_pool.hpp>
-#include <nano/node/scheduler/buckets.hpp>
+#include <nano/lib/blocks.hpp>
+#include <nano/node/active_transactions.hpp>
+#include <nano/node/election.hpp>
 #include <nano/node/scheduler/component.hpp>
+#include <nano/node/scheduler/manual.hpp>
+#include <nano/node/scheduler/priority.hpp>
 #include <nano/node/transport/fake.hpp>
+#include <nano/secure/ledger.hpp>
+#include <nano/secure/pending_info.hpp>
+#include <nano/store/block.hpp>
 #include <nano/test_common/system.hpp>
 #include <nano/test_common/testutil.hpp>
 
@@ -59,11 +66,11 @@ nano::account nano::test::random_account ()
 
 bool nano::test::process (nano::node & node, std::vector<std::shared_ptr<nano::block>> blocks)
 {
-	auto const transaction = node.store.tx_begin_write ({ tables::accounts, tables::blocks, tables::frontiers, tables::pending });
+	auto const transaction = node.ledger.tx_begin_write ({ tables::accounts, tables::blocks, tables::pending, tables::rep_weights });
 	for (auto & block : blocks)
 	{
-		auto result = node.process (transaction, *block);
-		if (result.code != nano::process_result::progress)
+		auto result = node.process (transaction, block);
+		if (result != nano::block_status::progress && result != nano::block_status::old)
 		{
 			return false;
 		}
@@ -78,38 +85,6 @@ bool nano::test::process_live (nano::node & node, std::vector<std::shared_ptr<na
 		node.process_active (block);
 	}
 	return true;
-}
-
-bool nano::test::confirm (nano::node & node, std::vector<nano::block_hash> hashes)
-{
-	// Finish processing all blocks - FIXME: block processor flush is broken and should be removed
-	node.block_processor.flush ();
-	for (auto & hash : hashes)
-	{
-		if (node.block_confirmed (hash))
-		{
-			continue;
-		}
-
-		auto disk_block = node.block (hash);
-		// A sideband is required to start an election
-		release_assert (disk_block != nullptr);
-		release_assert (disk_block->has_sideband ());
-		// This only starts election
-		auto election = node.block_confirm (disk_block);
-		if (election == nullptr)
-		{
-			return false;
-		}
-		// Here we actually confirm the block
-		election->force_confirm ();
-	}
-	return true;
-}
-
-bool nano::test::confirm (nano::node & node, std::vector<std::shared_ptr<nano::block>> blocks)
-{
-	return confirm (node, blocks_to_hashes (blocks));
 }
 
 bool nano::test::confirmed (nano::node & node, std::vector<nano::block_hash> hashes)
@@ -146,6 +121,34 @@ bool nano::test::exists (nano::node & node, std::vector<std::shared_ptr<nano::bl
 	return exists (node, blocks_to_hashes (blocks));
 }
 
+bool nano::test::block_or_pruned_all_exists (nano::node & node, std::vector<nano::block_hash> hashes)
+{
+	auto transaction = node.ledger.tx_begin_read ();
+	return std::all_of (hashes.begin (), hashes.end (),
+	[&] (const auto & hash) {
+		return node.ledger.block_or_pruned_exists (transaction, hash);
+	});
+}
+
+bool nano::test::block_or_pruned_all_exists (nano::node & node, std::vector<std::shared_ptr<nano::block>> blocks)
+{
+	return block_or_pruned_all_exists (node, blocks_to_hashes (blocks));
+}
+
+bool nano::test::block_or_pruned_none_exists (nano::node & node, std::vector<nano::block_hash> hashes)
+{
+	auto transaction = node.ledger.tx_begin_read ();
+	return std::none_of (hashes.begin (), hashes.end (),
+	[&] (const auto & hash) {
+		return node.ledger.block_or_pruned_exists (transaction, hash);
+	});
+}
+
+bool nano::test::block_or_pruned_none_exists (nano::node & node, std::vector<std::shared_ptr<nano::block>> blocks)
+{
+	return block_or_pruned_none_exists (node, blocks_to_hashes (blocks));
+}
+
 bool nano::test::activate (nano::node & node, std::vector<nano::block_hash> hashes)
 {
 	for (auto & hash : hashes)
@@ -156,7 +159,7 @@ bool nano::test::activate (nano::node & node, std::vector<nano::block_hash> hash
 			// Block does not exist in the ledger yet
 			return false;
 		}
-		node.scheduler.buckets.manual (disk_block);
+		node.scheduler.manual.push (disk_block);
 	}
 	return true;
 }
@@ -212,7 +215,7 @@ std::vector<nano::block_hash> nano::test::blocks_to_hashes (std::vector<std::sha
 	return hashes;
 }
 
-std::shared_ptr<nano::transport::channel> nano::test::fake_channel (nano::node & node, nano::account node_id)
+std::shared_ptr<nano::transport::fake::channel> nano::test::fake_channel (nano::node & node, nano::account node_id)
 {
 	auto channel = std::make_shared<nano::transport::fake::channel> (node);
 	if (!node_id.is_zero ())
@@ -237,7 +240,7 @@ std::shared_ptr<nano::election> nano::test::start_election (nano::test::system &
 		block_l = node_a.block (hash_a);
 	}
 
-	node_a.scheduler.buckets.manual (block_l);
+	node_a.scheduler.manual.push (block_l);
 
 	// wait for the election to appear
 	std::shared_ptr<nano::election> election = node_a.active.election (block_l->qualified_root ());
@@ -254,20 +257,99 @@ std::shared_ptr<nano::election> nano::test::start_election (nano::test::system &
 	return election;
 }
 
-void nano::test::start_elections (nano::test::system & system_a, nano::node & node_a, std::vector<nano::block_hash> const & hashes_a, bool const forced_a)
+bool nano::test::start_elections (nano::test::system & system_a, nano::node & node_a, std::vector<nano::block_hash> const & hashes_a, bool const forced_a)
 {
 	for (auto const & hash_l : hashes_a)
 	{
 		auto election = nano::test::start_election (system_a, node_a, hash_l);
-		release_assert (election);
+		if (!election)
+		{
+			return false;
+		}
 		if (forced_a)
 		{
 			election->force_confirm ();
 		}
 	}
+	return true;
 }
 
-void nano::test::start_elections (nano::test::system & system_a, nano::node & node_a, std::vector<std::shared_ptr<nano::block>> const & blocks_a, bool const forced_a)
+bool nano::test::start_elections (nano::test::system & system_a, nano::node & node_a, std::vector<std::shared_ptr<nano::block>> const & blocks_a, bool const forced_a)
 {
-	nano::test::start_elections (system_a, node_a, blocks_to_hashes (blocks_a), forced_a);
+	return nano::test::start_elections (system_a, node_a, blocks_to_hashes (blocks_a), forced_a);
+}
+
+nano::account_info nano::test::account_info (nano::node const & node, nano::account const & acc)
+{
+	auto const tx = node.ledger.tx_begin_read ();
+	auto opt = node.ledger.account_info (tx, acc);
+	if (opt.has_value ())
+	{
+		return opt.value ();
+	}
+	return {};
+}
+
+uint64_t nano::test::account_height (nano::node const & node, nano::account const & acc)
+{
+	auto const tx = node.ledger.tx_begin_read ();
+	nano::confirmation_height_info height_info;
+	if (node.ledger.store.confirmation_height.get (tx, acc, height_info))
+	{
+		return 0;
+	}
+	return height_info.height;
+}
+
+void nano::test::print_all_receivable_entries (const nano::store::component & store)
+{
+	std::cout << "Printing all receivable entries:\n";
+	auto const tx = store.tx_begin_read ();
+	auto const end = store.pending.end ();
+	for (auto i = store.pending.begin (tx); i != end; ++i)
+	{
+		std::cout << "Key:  " << i->first << std::endl;
+		std::cout << "Info: " << i->second << std::endl;
+	}
+}
+
+void nano::test::print_all_account_info (const nano::ledger & ledger)
+{
+	std::cout << "Printing all account info:\n";
+	auto const tx = ledger.tx_begin_read ();
+	auto const end = ledger.store.account.end ();
+	for (auto i = ledger.store.account.begin (tx); i != end; ++i)
+	{
+		nano::account acc = i->first;
+		nano::account_info acc_info = i->second;
+		nano::confirmation_height_info height_info;
+		std::cout << "Account: " << acc.to_account () << std::endl;
+		std::cout << "  Unconfirmed Balance: " << acc_info.balance.to_string_dec () << std::endl;
+		std::cout << "  Confirmed Balance:   " << ledger.account_balance (tx, acc, true) << std::endl;
+		std::cout << "  Block Count:         " << acc_info.block_count << std::endl;
+		if (!ledger.store.confirmation_height.get (tx, acc, height_info))
+		{
+			std::cout << "  Conf. Height:        " << height_info.height << std::endl;
+			std::cout << "  Conf. Frontier:      " << height_info.frontier.to_string () << std::endl;
+		}
+	}
+}
+
+void nano::test::print_all_blocks (const nano::store::component & store)
+{
+	auto tx = store.tx_begin_read ();
+	auto i = store.block.begin (tx);
+	auto end = store.block.end ();
+	std::cout << "Listing all blocks" << std::endl;
+	for (; i != end; ++i)
+	{
+		nano::block_hash hash = i->first;
+		nano::store::block_w_sideband sideband = i->second;
+		std::shared_ptr<nano::block> b = sideband.block;
+		std::cout << "Hash: " << hash.to_string () << std::endl;
+		const auto acc = sideband.sideband.account;
+		std::cout << "Acc: " << acc.to_string () << "(" << acc.to_account () << ")" << std::endl;
+		std::cout << "Height: " << sideband.sideband.height << std::endl;
+		std::cout << b->to_json ();
+	}
 }

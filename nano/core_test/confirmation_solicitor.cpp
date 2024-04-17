@@ -1,5 +1,8 @@
+#include <nano/lib/blocks.hpp>
 #include <nano/lib/jsonconfig.hpp>
+#include <nano/node/active_transactions.hpp>
 #include <nano/node/confirmation_solicitor.hpp>
+#include <nano/node/election.hpp>
 #include <nano/node/transport/inproc.hpp>
 #include <nano/test_common/network.hpp>
 #include <nano/test_common/system.hpp>
@@ -20,7 +23,7 @@ TEST (confirmation_solicitor, batches)
 	auto & node2 = *system.add_node (node_flags);
 	auto channel1 = nano::test::establish_tcp (system, node2, node1.network.endpoint ());
 	// Solicitor will only solicit from this representative
-	nano::representative representative (nano::dev::genesis_key.pub, channel1);
+	nano::representative representative{ nano::dev::genesis_key.pub, channel1 };
 	std::vector<nano::representative> representatives{ representative };
 	nano::confirmation_solicitor solicitor (node2.network, node2.config);
 	solicitor.prepare (representatives);
@@ -28,7 +31,7 @@ TEST (confirmation_solicitor, batches)
 	ASSERT_EQ (1, representatives.size ());
 	ASSERT_EQ (channel1, representatives.front ().channel);
 	ASSERT_EQ (nano::dev::genesis_key.pub, representatives.front ().account);
-	ASSERT_TIMELY (3s, node2.network.size () == 1);
+	ASSERT_TIMELY_EQ (3s, node2.network.size (), 1);
 	nano::block_builder builder;
 	auto send = builder
 				.send ()
@@ -37,7 +40,7 @@ TEST (confirmation_solicitor, batches)
 				.balance (nano::dev::constants.genesis_amount - 100)
 				.sign (nano::dev::genesis_key.prv, nano::dev::genesis_key.pub)
 				.work (*system.work.generate (nano::dev::genesis->hash ()))
-				.build_shared ();
+				.build ();
 	send->sideband_set ({});
 	{
 		nano::lock_guard<nano::mutex> guard (node2.active.mutex);
@@ -70,7 +73,7 @@ TEST (confirmation_solicitor, different_hash)
 	auto & node2 = *system.add_node (node_flags);
 	auto channel1 = nano::test::establish_tcp (system, node2, node1.network.endpoint ());
 	// Solicitor will only solicit from this representative
-	nano::representative representative (nano::dev::genesis_key.pub, channel1);
+	nano::representative representative{ nano::dev::genesis_key.pub, channel1 };
 	std::vector<nano::representative> representatives{ representative };
 	nano::confirmation_solicitor solicitor (node2.network, node2.config);
 	solicitor.prepare (representatives);
@@ -78,7 +81,7 @@ TEST (confirmation_solicitor, different_hash)
 	ASSERT_EQ (1, representatives.size ());
 	ASSERT_EQ (channel1, representatives.front ().channel);
 	ASSERT_EQ (nano::dev::genesis_key.pub, representatives.front ().account);
-	ASSERT_TIMELY (3s, node2.network.size () == 1);
+	ASSERT_TIMELY_EQ (3s, node2.network.size (), 1);
 	nano::block_builder builder;
 	auto send = builder
 				.send ()
@@ -87,7 +90,7 @@ TEST (confirmation_solicitor, different_hash)
 				.balance (nano::dev::constants.genesis_amount - 100)
 				.sign (nano::dev::genesis_key.prv, nano::dev::genesis_key.pub)
 				.work (*system.work.generate (nano::dev::genesis->hash ()))
-				.build_shared ();
+				.build ();
 	send->sideband_set ({});
 	auto election (std::make_shared<nano::election> (node2, send, nullptr, nullptr, nano::election_behavior::normal));
 	// Add a vote for something else, not the winner
@@ -122,7 +125,7 @@ TEST (confirmation_solicitor, bypass_max_requests_cap)
 	}
 	ASSERT_EQ (max_representatives + 1, representatives.size ());
 	solicitor.prepare (representatives);
-	ASSERT_TIMELY (3s, node2.network.size () == 1);
+	ASSERT_TIMELY_EQ (3s, node2.network.size (), 1);
 	nano::block_builder builder;
 	auto send = builder
 				.send ()
@@ -131,20 +134,19 @@ TEST (confirmation_solicitor, bypass_max_requests_cap)
 				.balance (nano::dev::constants.genesis_amount - 100)
 				.sign (nano::dev::genesis_key.prv, nano::dev::genesis_key.pub)
 				.work (*system.work.generate (nano::dev::genesis->hash ()))
-				.build_shared ();
+				.build ();
 	send->sideband_set ({});
 	auto election (std::make_shared<nano::election> (node2, send, nullptr, nullptr, nano::election_behavior::normal));
 	// Add a vote for something else, not the winner
 	for (auto const & rep : representatives)
 	{
-		nano::lock_guard<nano::mutex> guard (election->mutex);
-		election->last_votes[rep.account] = { std::chrono::steady_clock::now (), 1, 1 };
+		election->set_last_vote (rep.account, { std::chrono::steady_clock::now (), 1, 1 });
 	}
 	ASSERT_FALSE (solicitor.add (*election));
 	ASSERT_FALSE (solicitor.broadcast (*election));
 	solicitor.flush ();
 	// All requests went through, the last one would normally not go through due to the cap but a vote for a different hash does not count towards the cap
-	ASSERT_TIMELY (6s, max_representatives + 1 == node2.stats.count (nano::stat::type::message, nano::stat::detail::confirm_req, nano::stat::dir::out));
+	ASSERT_TIMELY_EQ (6s, max_representatives + 1, node2.stats.count (nano::stat::type::message, nano::stat::detail::confirm_req, nano::stat::dir::out));
 
 	solicitor.prepare (representatives);
 	auto election2 (std::make_shared<nano::election> (node2, send, nullptr, nullptr, nano::election_behavior::normal));

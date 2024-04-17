@@ -3,6 +3,7 @@
 #include <nano/lib/locks.hpp>
 #include <nano/lib/numbers.hpp>
 #include <nano/lib/stats.hpp>
+#include <nano/lib/thread_roles.hpp>
 #include <nano/lib/threading.hpp>
 #include <nano/lib/utility.hpp>
 
@@ -107,7 +108,7 @@ public:
 	}
 
 public: // Container info
-	std::unique_ptr<container_info_component> collect_container_info (std::string const & name)
+	std::unique_ptr<container_info_component> collect_container_info (std::string const & name) const
 	{
 		nano::lock_guard<nano::mutex> guard{ mutex };
 

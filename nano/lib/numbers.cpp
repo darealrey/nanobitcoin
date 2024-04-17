@@ -428,15 +428,6 @@ bool nano::validate_message (nano::public_key const & public_key, nano::uint256_
 	return validate_message (public_key, message.bytes.data (), sizeof (message.bytes), signature);
 }
 
-bool nano::validate_message_batch (const unsigned char ** m, size_t * mlen, const unsigned char ** pk, const unsigned char ** RS, size_t num, int * valid)
-{
-	for (size_t i{ 0 }; i < num; ++i)
-	{
-		valid[i] = (0 == ed25519_sign_open (m[i], mlen[i], pk[i], RS[i]));
-	}
-	return true;
-}
-
 nano::uint128_union::uint128_union (std::string const & string_a)
 {
 	auto error (decode_hex (string_a));
@@ -901,6 +892,27 @@ std::string nano::to_string (double const value_a, int const precision_a)
 	stream << std::setprecision (precision_a) << std::fixed;
 	stream << value_a;
 	return stream.str ();
+}
+
+std::ostream & nano::operator<< (std::ostream & os, const uint128_union & val)
+{
+	// TODO: Replace with streaming implementation
+	os << val.to_string ();
+	return os;
+}
+
+std::ostream & nano::operator<< (std::ostream & os, const uint256_union & val)
+{
+	// TODO: Replace with streaming implementation
+	os << val.to_string ();
+	return os;
+}
+
+std::ostream & nano::operator<< (std::ostream & os, const uint512_union & val)
+{
+	// TODO: Replace with streaming implementation
+	os << val.to_string ();
+	return os;
 }
 
 #ifdef _WIN32

@@ -1,3 +1,5 @@
+#include <nano/lib/blocks.hpp>
+#include <nano/node/active_transactions.hpp>
 #include <nano/test_common/rate_observer.hpp>
 #include <nano/test_common/system.hpp>
 #include <nano/test_common/testutil.hpp>
@@ -26,7 +28,7 @@ nano::keypair setup_rep (nano::test::system & system, nano::node & node, nano::u
 				.balance (balance - amount)
 				.sign (nano::dev::genesis_key.prv, nano::dev::genesis_key.pub)
 				.work (*system.work.generate (latest))
-				.build_shared ();
+				.build ();
 
 	auto open = builder
 				.open ()
@@ -35,10 +37,10 @@ nano::keypair setup_rep (nano::test::system & system, nano::node & node, nano::u
 				.account (key.pub)
 				.sign (key.prv, key.pub)
 				.work (*system.work.generate (key.pub))
-				.build_shared ();
+				.build ();
 
 	EXPECT_TRUE (nano::test::process (node, { send, open }));
-	EXPECT_TIMELY (5s, nano::test::confirm (node, { send, open }));
+	EXPECT_TRUE (nano::test::start_elections (system, node, { send, open }, true));
 	EXPECT_TIMELY (5s, nano::test::confirmed (node, { send, open }));
 
 	return key;
@@ -81,7 +83,7 @@ std::vector<std::shared_ptr<nano::block>> setup_blocks (nano::test::system & sys
 					.balance (balance)
 					.sign (nano::dev::genesis_key.prv, nano::dev::genesis_key.pub)
 					.work (*system.work.generate (latest))
-					.build_shared ();
+					.build ();
 
 		auto open = builder
 					.open ()
@@ -90,7 +92,7 @@ std::vector<std::shared_ptr<nano::block>> setup_blocks (nano::test::system & sys
 					.account (key.pub)
 					.sign (key.prv, key.pub)
 					.work (*system.work.generate (key.pub))
-					.build_shared ();
+					.build ();
 
 		latest = send->hash ();
 
@@ -104,7 +106,7 @@ std::vector<std::shared_ptr<nano::block>> setup_blocks (nano::test::system & sys
 	EXPECT_TRUE (nano::test::process (node, receives));
 
 	// Confirm whole genesis chain at once
-	EXPECT_TIMELY (5s, nano::test::confirm (node, { sends.back () }));
+	EXPECT_TRUE (nano::test::start_elections (system, node, { sends.back () }, true));
 	EXPECT_TIMELY (5s, nano::test::confirmed (node, { sends }));
 
 	std::cout << "setup_blocks done" << std::endl;
@@ -184,7 +186,7 @@ TEST (vote_cache, perf_singlethreaded)
 	ASSERT_EQ (node.stats.count (nano::stat::type::vote_cache, nano::stat::detail::vote_processed, nano::stat::dir::in), vote_count * single_vote_size * single_vote_reps);
 
 	// Ensure vote cache size is at max capacity
-	ASSERT_EQ (node.inactive_vote_cache.cache_size (), flags.inactive_votes_cache_size);
+	ASSERT_EQ (node.vote_cache.size (), config.vote_cache.max_size);
 }
 
 TEST (vote_cache, perf_multithreaded)
@@ -247,5 +249,5 @@ TEST (vote_cache, perf_multithreaded)
 	std::cout << "total votes processed: " << node.stats.count (nano::stat::type::vote_cache, nano::stat::detail::vote_processed, nano::stat::dir::in) << std::endl;
 
 	// Ensure vote cache size is at max capacity
-	ASSERT_EQ (node.inactive_vote_cache.cache_size (), flags.inactive_votes_cache_size);
+	ASSERT_EQ (node.vote_cache.size (), config.vote_cache.max_size);
 }

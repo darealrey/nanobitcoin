@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <string_view>
 
+#include <magic_enum.hpp>
+
 namespace nano::stat
 {
 /** Primary statistics type */
@@ -15,13 +17,16 @@ enum class type : uint8_t
 	ledger,
 	rollback,
 	bootstrap,
+	network,
 	tcp_server,
 	vote,
 	election,
 	http_callback,
-	peering,
 	ipc,
 	tcp,
+	tcp_channels,
+	channel,
+	socket,
 	confirmation_height,
 	confirmation_observer,
 	drop,
@@ -33,6 +38,9 @@ enum class type : uint8_t
 	vote_cache,
 	hinting,
 	blockprocessor,
+	blockprocessor_source,
+	blockprocessor_result,
+	blockprocessor_overfill,
 	bootstrap_server,
 	active,
 	active_started,
@@ -44,12 +52,12 @@ enum class type : uint8_t
 	election_scheduler,
 	optimistic_scheduler,
 	handshake,
+	rep_crawler,
+	local_block_broadcaster,
+	rep_tiers,
+	syn_cookies,
 
-	bootstrap_server_requests,
-	bootstrap_server_responses,
 	bootstrap_ascending,
-	bootstrap_ascending_connections,
-	bootstrap_ascending_thread,
 	bootstrap_ascending_accounts,
 
 	_last // Must be the last enum
@@ -63,11 +71,22 @@ enum class detail : uint8_t
 	// common
 	ok,
 	loop,
+	loop_cleanup,
 	total,
 	process,
+	processed,
+	ignored,
 	update,
+	updated,
 	request,
 	broadcast,
+	cleanup,
+	top,
+	none,
+	success,
+	unknown,
+	cache,
+	queue_overflow,
 
 	// processing queue
 	queue,
@@ -75,7 +94,6 @@ enum class detail : uint8_t
 	batch,
 
 	// error specific
-	bad_sender,
 	insufficient_work,
 	http_callback,
 	unreachable_host,
@@ -97,6 +115,7 @@ enum class detail : uint8_t
 	old,
 	gap_previous,
 	gap_source,
+	rollback,
 	rollback_failed,
 	progress,
 	bad_signature,
@@ -108,12 +127,24 @@ enum class detail : uint8_t
 	representative_mismatch,
 	block_position,
 
+	// blockprocessor
+	process_blocking,
+	process_blocking_timeout,
+	force,
+
+	// block source
+	live,
+	bootstrap,
+	bootstrap_legacy,
+	unchecked,
+	local,
+	forced,
+
 	// message specific
 	not_a_type,
 	invalid,
 	keepalive,
 	publish,
-	republish_vote,
 	confirm_req,
 	confirm_ack,
 	node_id_handshake,
@@ -131,40 +162,42 @@ enum class detail : uint8_t
 	// bootstrap specific
 	bulk_pull,
 	bulk_pull_account,
-	bulk_pull_deserialize_receive_block,
 	bulk_pull_error_starting_request,
 	bulk_pull_failed_account,
-	bulk_pull_receive_block_failure,
 	bulk_pull_request_failure,
 	bulk_push,
 	frontier_req,
 	frontier_confirmation_failed,
-	frontier_confirmation_successful,
 	error_socket_close,
-	request_underflow,
 
-	// vote specific
-	vote_valid,
-	vote_replay,
-	vote_indeterminate,
-	vote_invalid,
+	// vote result
+	vote,
+	valid,
+	replay,
+	indeterminate,
+
+	// vote processor
 	vote_overflow,
+	vote_ignored,
 
 	// election specific
 	vote_new,
 	vote_processed,
 	vote_cached,
-	late_block,
-	late_block_seconds,
 	election_block_conflict,
 	election_restart,
 	election_not_confirmed,
 	election_hinted_overflow,
 	election_hinted_confirmed,
 	election_hinted_drop,
+	broadcast_vote,
+	broadcast_vote_normal,
+	broadcast_vote_final,
 	generate_vote,
 	generate_vote_normal,
 	generate_vote_final,
+	broadcast_block_initial,
+	broadcast_block_repeat,
 
 	// election types
 	normal,
@@ -186,8 +219,13 @@ enum class detail : uint8_t
 	invalid_frontier_req_message,
 	invalid_asc_pull_req_message,
 	invalid_asc_pull_ack_message,
-	message_too_big,
+	message_size_too_big,
 	outdated_version,
+
+	// network
+	loop_keepalive,
+	loop_reachout,
+	merge_peer,
 
 	// tcp
 	tcp_accept_success,
@@ -203,11 +241,17 @@ enum class detail : uint8_t
 	tcp_read_error,
 	tcp_write_error,
 
+	// tcp_server
+	handshake,
+	handshake_abort,
+	handshake_error,
+	handshake_network_error,
+	handshake_initiate,
+	handshake_response,
+	handshake_response_invalid,
+
 	// ipc
 	invocations,
-
-	// peering
-	handshake,
 
 	// confirmation height
 	blocks_confirmed,
@@ -223,17 +267,14 @@ enum class detail : uint8_t
 	requests_generated_hashes,
 	requests_cached_votes,
 	requests_generated_votes,
-	requests_cached_late_hashes,
-	requests_cached_late_votes,
 	requests_cannot_vote,
 	requests_unknown,
 
 	// duplicate
-	duplicate_publish,
+	duplicate_publish_message,
 
 	// telemetry
 	invalid_signature,
-	different_genesis_hash,
 	node_id_mismatch,
 	genesis_mismatch,
 	request_within_protection_cache_zone,
@@ -242,7 +283,6 @@ enum class detail : uint8_t
 	failed_send_telemetry_req,
 	empty_payload,
 	cleanup_outdated,
-	cleanup_dead,
 
 	// vote generator
 	generator_broadcasts,
@@ -252,17 +292,21 @@ enum class detail : uint8_t
 
 	// hinting
 	missing_block,
+	dependent_unconfirmed,
+	already_confirmed,
+	activate,
+	activate_immediate,
+	dependent_activated,
 
 	// bootstrap server
 	response,
-	write_drop,
 	write_error,
 	blocks,
-	drop,
-	bad_count,
 	response_blocks,
 	response_account_info,
 	channel_full,
+	response_frontiers,
+	frontiers,
 
 	// backlog
 	activated,
@@ -295,19 +339,6 @@ enum class detail : uint8_t
 	timeout,
 	nothing_new,
 
-	// bootstrap ascending connections
-	connect,
-	connect_missing,
-	connect_failed,
-	connect_success,
-	reuse,
-
-	// bootstrap ascending thread
-	read_block,
-	read_block_done,
-	read_block_end,
-	read_block_error,
-
 	// bootstrap ascending accounts
 	prioritize,
 	prioritize_failed,
@@ -328,13 +359,23 @@ enum class detail : uint8_t
 	deprioritize,
 	deprioritize_failed,
 
-	// active
-	started_hinted,
-	started_optimistic,
+	// rep_crawler
+	channel_dead,
+	query_target_failed,
+	query_channel_busy,
+	query_sent,
+	query_duplicate,
+	rep_timeout,
+	query_timeout,
+	query_completion,
+	crawl_aggressive,
+	crawl_normal,
 
-	// optimistic
-	pop_gap,
-	pop_leaf,
+	// block broadcaster
+	broadcast_normal,
+	broadcast_aggressive,
+	erase_old,
+	erase_confirmed,
 
 	_last // Must be the last enum
 };
@@ -351,7 +392,23 @@ enum class dir : uint8_t
 
 namespace nano
 {
-std::string_view to_string (stat::type type);
-std::string_view to_string (stat::detail detail);
-std::string_view to_string (stat::dir dir);
+std::string_view to_string (stat::type);
+std::string_view to_string (stat::detail);
+std::string_view to_string (stat::dir);
 }
+
+// Ensure that the enum_range is large enough to hold all values (including future ones)
+template <>
+struct magic_enum::customize::enum_range<nano::stat::type>
+{
+	static constexpr int min = 0;
+	static constexpr int max = 128;
+};
+
+// Ensure that the enum_range is large enough to hold all values (including future ones)
+template <>
+struct magic_enum::customize::enum_range<nano::stat::detail>
+{
+	static constexpr int min = 0;
+	static constexpr int max = 512;
+};

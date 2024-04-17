@@ -1,3 +1,5 @@
+#include <nano/lib/blocks.hpp>
+#include <nano/node/active_transactions.hpp>
 #include <nano/node/election.hpp>
 #include <nano/test_common/chains.hpp>
 #include <nano/test_common/system.hpp>
@@ -24,13 +26,13 @@ TEST (optimistic_scheduler, activate_one)
 	auto & [account, blocks] = chains.front ();
 
 	// Confirm block towards at the beginning the chain, so gap between confirmation and account frontier is larger than `gap_threshold`
-	ASSERT_TRUE (nano::test::confirm (node, { blocks.at (11) }));
+	ASSERT_TRUE (nano::test::start_elections (system, node, { blocks.at (11) }, true));
 	ASSERT_TIMELY (5s, nano::test::confirmed (node, { blocks.at (11) }));
 
 	// Ensure unconfirmed account head block gets activated
 	auto const & block = blocks.back ();
 	ASSERT_TIMELY (5s, node.active.active (block->hash ()));
-	ASSERT_TRUE (node.active.election (block->qualified_root ())->behavior () == nano::election_behavior::optimistic);
+	ASSERT_EQ (node.active.election (block->qualified_root ())->behavior (), nano::election_behavior::optimistic);
 }
 
 /*
@@ -51,7 +53,7 @@ TEST (optimistic_scheduler, activate_one_zero_conf)
 	// Ensure unconfirmed account head block gets activated
 	auto const & block = blocks.back ();
 	ASSERT_TIMELY (5s, node.active.active (block->hash ()));
-	ASSERT_TRUE (node.active.election (block->qualified_root ())->behavior () == nano::election_behavior::optimistic);
+	ASSERT_EQ (node.active.election (block->qualified_root ())->behavior (), nano::election_behavior::optimistic);
 }
 
 /*
@@ -93,7 +95,7 @@ TEST (optimistic_scheduler, under_gap_threshold)
 	auto & [account, blocks] = chains.front ();
 
 	// Confirm block towards the end of the chain, so gap between confirmation and account frontier is less than `gap_threshold`
-	ASSERT_TRUE (nano::test::confirm (node, { blocks.at (55) }));
+	ASSERT_TRUE (nano::test::start_elections (system, node, { blocks.at (55) }, true));
 	ASSERT_TIMELY (5s, nano::test::confirmed (node, { blocks.at (55) }));
 
 	// Manually trigger backlog scan

@@ -1,5 +1,10 @@
 #pragma once
 
+namespace nano::secure
+{
+class transaction;
+}
+
 namespace nano
 {
 class ledger;
@@ -8,28 +13,27 @@ class websocket_server;
 class block_processor;
 class process_return;
 class block;
-class transaction;
 
 namespace scheduler
 {
-	class buckets;
+	class priority;
 }
 
 // Observes confirmed blocks and dispatches the process_live function.
 class process_live_dispatcher
 {
 public:
-	process_live_dispatcher (nano::ledger & ledger, nano::scheduler::buckets & scheduler, nano::vote_cache & inactive_vote_cache, nano::websocket_server & websocket);
+	process_live_dispatcher (nano::ledger &, nano::scheduler::priority &, nano::vote_cache &, nano::websocket_server &);
 	void connect (nano::block_processor & block_processor);
 
 private:
 	// Block_processor observer
-	void inspect (nano::process_return const & result, nano::block const & block, nano::transaction const & transaction);
-	void process_live (nano::block const & block, nano::transaction const & transaction);
+	void inspect (nano::block_status const & result, nano::block const & block, secure::transaction const & transaction);
+	void process_live (nano::block const & block, secure::transaction const & transaction);
 
 	nano::ledger & ledger;
-	nano::scheduler::buckets & scheduler;
-	nano::vote_cache & inactive_vote_cache;
+	nano::scheduler::priority & scheduler;
+	nano::vote_cache & vote_cache;
 	nano::websocket_server & websocket;
 };
 }

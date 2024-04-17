@@ -18,10 +18,10 @@ TEST (distributed_work, no_peers)
 	nano::test::system system (1);
 	auto node (system.nodes[0]);
 	nano::block_hash hash{ 1 };
-	boost::optional<uint64_t> work;
+	std::optional<uint64_t> work;
 	std::atomic<bool> done{ false };
-	auto callback = [&work, &done] (boost::optional<uint64_t> work_a) {
-		ASSERT_TRUE (work_a.is_initialized ());
+	auto callback = [&work, &done] (std::optional<uint64_t> work_a) {
+		ASSERT_TRUE (work_a.has_value ());
 		work = work_a;
 		done = true;
 	};
@@ -54,8 +54,8 @@ TEST (distributed_work, no_peers_cancel)
 	auto & node = *system.add_node (node_config);
 	nano::block_hash hash{ 1 };
 	bool done{ false };
-	auto callback_to_cancel = [&done] (boost::optional<uint64_t> work_a) {
-		ASSERT_FALSE (work_a.is_initialized ());
+	auto callback_to_cancel = [&done] (std::optional<uint64_t> work_a) {
+		ASSERT_FALSE (work_a.has_value ());
 		done = true;
 	};
 	ASSERT_FALSE (node.distributed_work.make (nano::work_version::work_1, hash, node.config.work_peers, nano::difficulty::from_multiplier (1e6, node.network_params.work.base), callback_to_cancel));
@@ -83,8 +83,8 @@ TEST (distributed_work, no_peers_multi)
 	nano::block_hash hash{ 1 };
 	unsigned total{ 10 };
 	std::atomic<unsigned> count{ 0 };
-	auto callback = [&count] (boost::optional<uint64_t> work_a) {
-		ASSERT_TRUE (work_a.is_initialized ());
+	auto callback = [&count] (std::optional<uint64_t> work_a) {
+		ASSERT_TRUE (work_a.has_value ());
 		++count;
 	};
 	// Test many works for the same root
@@ -92,7 +92,7 @@ TEST (distributed_work, no_peers_multi)
 	{
 		ASSERT_FALSE (node->distributed_work.make (nano::work_version::work_1, hash, node->config.work_peers, nano::difficulty::from_multiplier (10, node->network_params.work.base), callback));
 	}
-	ASSERT_TIMELY (5s, count == total);
+	ASSERT_TIMELY_EQ (5s, count, total);
 	system.deadline_set (5s);
 	while (node->distributed_work.size () > 0)
 	{
@@ -106,7 +106,7 @@ TEST (distributed_work, no_peers_multi)
 		nano::block_hash hash_i (i + 1);
 		ASSERT_FALSE (node->distributed_work.make (nano::work_version::work_1, hash_i, node->config.work_peers, node->network_params.work.base, callback));
 	}
-	ASSERT_TIMELY (5s, count == total);
+	ASSERT_TIMELY_EQ (5s, count, total);
 	system.deadline_set (5s);
 	while (node->distributed_work.size () > 0)
 	{
@@ -125,10 +125,10 @@ TEST (distributed_work, peer)
 	auto node (system.add_node (node_config));
 	ASSERT_FALSE (node->local_work_generation_enabled ());
 	nano::block_hash hash{ 1 };
-	boost::optional<uint64_t> work;
+	std::optional<uint64_t> work;
 	std::atomic<bool> done{ false };
-	auto callback = [&work, &done] (boost::optional<uint64_t> work_a) {
-		ASSERT_TRUE (work_a.is_initialized ());
+	auto callback = [&work, &done] (std::optional<uint64_t> work_a) {
+		ASSERT_TRUE (work_a.has_value ());
 		work = work_a;
 		done = true;
 	};
@@ -151,10 +151,10 @@ TEST (distributed_work, peer_malicious)
 	auto node (system.nodes[0]);
 	ASSERT_TRUE (node->local_work_generation_enabled ());
 	nano::block_hash hash{ 1 };
-	boost::optional<uint64_t> work;
+	std::optional<uint64_t> work;
 	std::atomic<bool> done{ false };
-	auto callback = [&work, &done] (boost::optional<uint64_t> work_a) {
-		ASSERT_TRUE (work_a.is_initialized ());
+	auto callback = [&work, &done] (std::optional<uint64_t> work_a) {
+		ASSERT_TRUE (work_a.has_value ());
 		work = work_a;
 		done = true;
 	};
@@ -194,10 +194,10 @@ TEST (distributed_work, DISABLED_peer_multi)
 	auto node (system.nodes[0]);
 	ASSERT_TRUE (node->local_work_generation_enabled ());
 	nano::block_hash hash{ 1 };
-	boost::optional<uint64_t> work;
+	std::optional<uint64_t> work;
 	std::atomic<bool> done{ false };
-	auto callback = [&work, &done] (boost::optional<uint64_t> work_a) {
-		ASSERT_TRUE (work_a.is_initialized ());
+	auto callback = [&work, &done] (std::optional<uint64_t> work_a) {
+		ASSERT_TRUE (work_a.has_value ());
 		work = work_a;
 		done = true;
 	};
@@ -214,7 +214,7 @@ TEST (distributed_work, DISABLED_peer_multi)
 	ASSERT_FALSE (node->distributed_work.make (nano::work_version::work_1, hash, peers, node->network_params.work.base, callback, nano::account ()));
 	ASSERT_TIMELY (5s, done);
 	ASSERT_GE (nano::dev::network_params.work.difficulty (nano::work_version::work_1, hash, *work), node->network_params.work.base);
-	ASSERT_TIMELY (5s, slow_peer->cancels == 1);
+	ASSERT_TIMELY_EQ (5s, slow_peer->cancels, 1);
 	ASSERT_EQ (0, malicious_peer->generations_good);
 	ASSERT_EQ (1, malicious_peer->generations_bad);
 	ASSERT_EQ (0, malicious_peer->cancels);
@@ -233,10 +233,10 @@ TEST (distributed_work, fail_resolve)
 	nano::test::system system (1);
 	auto node (system.nodes[0]);
 	nano::block_hash hash{ 1 };
-	boost::optional<uint64_t> work;
+	std::optional<uint64_t> work;
 	std::atomic<bool> done{ false };
-	auto callback = [&work, &done] (boost::optional<uint64_t> work_a) {
-		ASSERT_TRUE (work_a.is_initialized ());
+	auto callback = [&work, &done] (std::optional<uint64_t> work_a) {
+		ASSERT_TRUE (work_a.has_value ());
 		work = work_a;
 		done = true;
 	};

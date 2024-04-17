@@ -1,3 +1,4 @@
+#include <nano/lib/blocks.hpp>
 #include <nano/lib/stats_enums.hpp>
 #include <nano/node/blockprocessor.hpp>
 #include <nano/node/bootstrap_ascending/service.hpp>
@@ -6,7 +7,8 @@
 #include <nano/node/transport/transport.hpp>
 #include <nano/secure/common.hpp>
 #include <nano/secure/ledger.hpp>
-#include <nano/secure/store.hpp>
+#include <nano/store/account.hpp>
+#include <nano/store/component.hpp>
 
 using namespace std::chrono_literals;
 
@@ -22,7 +24,7 @@ nano::bootstrap_ascending::service::service (nano::node_config & config_a, nano:
 	network{ network_a },
 	stats{ stat_a },
 	accounts{ stats },
-	iterator{ ledger.store },
+	iterator{ ledger },
 	throttle{ compute_throttle_size () },
 	scoring{ config.bootstrap_ascending, config.network_params.network },
 	database_limiter{ config.bootstrap_ascending.database_requests_limit, 1.0 }
@@ -32,12 +34,11 @@ nano::bootstrap_ascending::service::service (nano::node_config & config_a, nano:
 		{
 			nano::lock_guard<nano::mutex> lock{ mutex };
 
-			auto transaction = ledger.store.tx_begin_read ();
-			for (auto const & [result, block] : batch)
+			auto transaction = ledger.tx_begin_read ();
+			for (auto const & [result, context] : batch)
 			{
-				debug_assert (block != nullptr);
-
-				inspect (transaction, result, *block);
+				debug_assert (context.block != nullptr);
+				inspect (transaction, result, *context.block);
 			}
 		}
 
@@ -124,50 +125,33 @@ std::size_t nano::bootstrap_ascending::service::score_size () const
 - Marks an account as blocked if the result code is gap source as there is no reason request additional blocks for this account until the dependency is resolved
 - Marks an account as forwarded if it has been recently referenced by a block that has been inserted.
  */
-void nano::bootstrap_ascending::service::inspect (nano::transaction const & tx, nano::process_return const & result, nano::block const & block)
+void nano::bootstrap_ascending::service::inspect (secure::transaction const & tx, nano::block_status const & result, nano::block const & block)
 {
 	auto const hash = block.hash ();
 
-	switch (result.code)
+	switch (result)
 	{
-		case nano::process_result::progress:
+		case nano::block_status::progress:
 		{
-			const auto account = ledger.account (tx, hash);
-			const auto is_send = ledger.is_send (tx, block);
+			const auto account = block.account ();
 
 			// If we've inserted any block in to an account, unmark it as blocked
 			accounts.unblock (account);
 			accounts.priority_up (account);
 			accounts.timestamp (account, /* reset timestamp */ true);
 
-			if (is_send)
+			if (block.is_send ())
 			{
-				// TODO: Encapsulate this as a helper somewhere
-				nano::account destination{ 0 };
-				switch (block.type ())
-				{
-					case nano::block_type::send:
-						destination = block.destination ();
-						break;
-					case nano::block_type::state:
-						destination = block.link ().as_account ();
-						break;
-					default:
-						debug_assert (false, "unexpected block type");
-						break;
-				}
-				if (!destination.is_zero ())
-				{
-					accounts.unblock (destination, hash); // Unblocking automatically inserts account into priority set
-					accounts.priority_up (destination);
-				}
+				auto destination = block.destination ();
+				accounts.unblock (destination, hash); // Unblocking automatically inserts account into priority set
+				accounts.priority_up (destination);
 			}
 		}
 		break;
-		case nano::process_result::gap_source:
+		case nano::block_status::gap_source:
 		{
-			const auto account = block.previous ().is_zero () ? block.account () : ledger.account (tx, block.previous ());
-			const auto source = block.source ().is_zero () ? block.link ().as_block_hash () : block.source ();
+			const auto account = block.previous ().is_zero () ? block.account_field ().value () : ledger.account (tx, block.previous ()).value ();
+			const auto source = block.source_field ().value_or (block.link_field ().value_or (0).as_block_hash ());
 
 			// Mark account as blocked because it is missing the source block
 			accounts.block (account, source);
@@ -175,12 +159,12 @@ void nano::bootstrap_ascending::service::inspect (nano::transaction const & tx, 
 			// TODO: Track stats
 		}
 		break;
-		case nano::process_result::old:
+		case nano::block_status::old:
 		{
 			// TODO: Track stats
 		}
 		break;
-		case nano::process_result::gap_previous:
+		case nano::block_status::gap_previous:
 		{
 			// TODO: Track stats
 		}
@@ -193,9 +177,9 @@ void nano::bootstrap_ascending::service::inspect (nano::transaction const & tx, 
 void nano::bootstrap_ascending::service::wait_blockprocessor ()
 {
 	nano::unique_lock<nano::mutex> lock{ mutex };
-	while (!stopped && block_processor.half_full ())
+	while (!stopped && block_processor.size (nano::block_source::bootstrap) > config.bootstrap_ascending.block_wait_count)
 	{
-		condition.wait_for (lock, 500ms, [this] () { return stopped; }); // Blockprocessor is relatively slow, sleeping here instead of using conditions
+		condition.wait_for (lock, std::chrono::milliseconds{ config.bootstrap_ascending.throttle_wait }, [this] () { return stopped; }); // Blockprocessor is relatively slow, sleeping here instead of using conditions
 	}
 }
 
@@ -205,7 +189,7 @@ std::shared_ptr<nano::transport::channel> nano::bootstrap_ascending::service::wa
 	nano::unique_lock<nano::mutex> lock{ mutex };
 	while (!stopped && !(channel = scoring.channel ()))
 	{
-		condition.wait_for (lock, 100ms, [this] () { return stopped; });
+		condition.wait_for (lock, std::chrono::milliseconds{ config.bootstrap_ascending.throttle_wait }, [this] () { return stopped; });
 	}
 	return channel;
 }
@@ -365,6 +349,7 @@ void nano::bootstrap_ascending::service::process (nano::asc_pull_ack const & mes
 
 		on_reply.notify (tag);
 		condition.notify_all ();
+
 		std::visit ([this, &tag] (auto && request) { return process (request, tag); }, message.payload);
 	}
 	else
@@ -386,7 +371,7 @@ void nano::bootstrap_ascending::service::process (const nano::asc_pull_ack::bloc
 
 			for (auto & block : response.blocks)
 			{
-				block_processor.add (block);
+				block_processor.add (block, nano::block_source::bootstrap);
 			}
 			nano::lock_guard<nano::mutex> lock{ mutex };
 			throttle.add (true);
@@ -413,6 +398,11 @@ void nano::bootstrap_ascending::service::process (const nano::asc_pull_ack::bloc
 void nano::bootstrap_ascending::service::process (const nano::asc_pull_ack::account_info_payload & response, const nano::bootstrap_ascending::service::async_tag & tag)
 {
 	// TODO: Make use of account info
+}
+
+void nano::bootstrap_ascending::service::process (const nano::asc_pull_ack::frontiers_payload & response, const nano::bootstrap_ascending::service::async_tag & tag)
+{
+	// TODO: Make use of frontiers info
 }
 
 void nano::bootstrap_ascending::service::process (const nano::empty_payload & response, const nano::bootstrap_ascending::service::async_tag & tag)
@@ -449,7 +439,7 @@ nano::bootstrap_ascending::service::verify_result nano::bootstrap_ascending::ser
 		case async_tag::query_type::blocks_by_account:
 		{
 			// Open & state blocks always contain account field
-			if (first->account () != tag.start.as_account ())
+			if (first->account_field () != tag.start.as_account ())
 			{
 				// TODO: Stat & log
 				return verify_result::invalid;
@@ -495,7 +485,7 @@ std::size_t nano::bootstrap_ascending::service::compute_throttle_size () const
 {
 	// Scales logarithmically with ledger block
 	// Returns: config.throttle_coefficient * sqrt(block_count)
-	std::size_t size_new = config.bootstrap_ascending.throttle_coefficient * std::sqrt (ledger.cache.block_count.load ());
+	std::size_t size_new = config.bootstrap_ascending.throttle_coefficient * std::sqrt (ledger.block_count ());
 	return size_new == 0 ? 16 : size_new;
 }
 
@@ -505,6 +495,8 @@ std::unique_ptr<nano::container_info_component> nano::bootstrap_ascending::servi
 
 	auto composite = std::make_unique<container_info_composite> (name);
 	composite->add_component (std::make_unique<container_info_leaf> (container_info{ "tags", tags.size (), sizeof (decltype (tags)::value_type) }));
+	composite->add_component (std::make_unique<container_info_leaf> (container_info{ "throttle", throttle.size (), 0 }));
+	composite->add_component (std::make_unique<container_info_leaf> (container_info{ "throttle_successes", throttle.successes (), 0 }));
 	composite->add_component (accounts.collect_container_info ("accounts"));
 	return composite;
 }

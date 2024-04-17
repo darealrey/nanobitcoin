@@ -334,16 +334,14 @@ TEST (telemetry, disconnected)
 	nano::node_flags node_flags;
 	auto node_client = system.add_node (node_flags);
 	auto node_server = system.add_node (node_flags);
-
 	nano::test::wait_peer_connections (system);
-
 	auto channel = node_client->network.find_node_id (node_server->get_node_id ());
 	ASSERT_NE (nullptr, channel);
 
 	// Ensure telemetry is available before disconnecting
 	ASSERT_TIMELY (5s, node_client->telemetry.get_telemetry (channel->get_endpoint ()));
 
-	node_server->stop ();
+	system.stop_node (*node_server);
 	ASSERT_TRUE (channel);
 
 	// Ensure telemetry from disconnected peer is removed
@@ -368,7 +366,7 @@ TEST (telemetry, dos_tcp)
 		ASSERT_FALSE (ec);
 	});
 
-	ASSERT_TIMELY (5s, 1 == node_server->stats.count (nano::stat::type::message, nano::stat::detail::telemetry_req, nano::stat::dir::in));
+	ASSERT_TIMELY_EQ (5s, 1, node_server->stats.count (nano::stat::type::message, nano::stat::detail::telemetry_req, nano::stat::dir::in));
 
 	auto orig = std::chrono::steady_clock::now ();
 	for (int i = 0; i < 10; ++i)
@@ -440,7 +438,7 @@ TEST (telemetry, max_possible_size)
 		ASSERT_FALSE (ec);
 	});
 
-	ASSERT_TIMELY (5s, 1 == node_server->stats.count (nano::stat::type::message, nano::stat::detail::telemetry_ack, nano::stat::dir::in));
+	ASSERT_TIMELY_EQ (5s, 1, node_server->stats.count (nano::stat::type::message, nano::stat::detail::telemetry_ack, nano::stat::dir::in));
 }
 
 TEST (telemetry, maker_pruning)

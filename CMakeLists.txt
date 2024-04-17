@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.4)
+cmake_minimum_required(VERSION 3.14)
 
 if(CMAKE_VERSION VERSION_GREATER 3.12 OR CMAKE_VERSION VERSION_EQUAL 3.12)
   # find_package uses <PACKAGENAME>_ROOT variables
@@ -11,7 +11,7 @@ endif()
 
 # OSX compatibility needs to be set before project is declared
 set(CMAKE_OSX_DEPLOYMENT_TARGET
-    12
+    13.3
     CACHE STRING "")
 
 project(nano-node)
@@ -38,7 +38,7 @@ if(MSVC)
 endif()
 
 set(CPACK_PACKAGE_VENDOR "Nano Currency")
-set(CPACK_PACKAGE_VERSION_MAJOR "26")
+set(CPACK_PACKAGE_VERSION_MAJOR "27")
 set(CPACK_PACKAGE_VERSION_MINOR "0")
 set(CPACK_PACKAGE_VERSION_PATCH "0")
 
@@ -97,7 +97,6 @@ set_property(
            block_arrival
            block_processor
            block_uniquer
-           confirmation_height_processor
            dropped_elections,
            election_winner_details
            gap_cache
@@ -133,6 +132,17 @@ if(NANO_STACKTRACE_BACKTRACE)
   endif()
 endif()
 
+# Enable NANO_TRACING by default in Debug builds
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+  option(NANO_TRACING "Enable trace logging" ON)
+else()
+  option(NANO_TRACING "Enable trace logging" OFF)
+endif()
+if(NANO_TRACING)
+  message(STATUS "Using trace logging")
+  add_compile_definitions(NANO_TRACING)
+endif()
+
 if(${NANO_TIMED_LOCKS} GREATER 0)
   add_definitions(-DNANO_TIMED_LOCKS=${NANO_TIMED_LOCKS})
   add_definitions(-DNANO_TIMED_LOCKS_FILTER=${NANO_TIMED_LOCKS_FILTER})
@@ -146,9 +156,6 @@ if(${NANO_ASIO_HANDLER_TRACKING} GREATER 0)
                   -DBOOST_ASIO_ENABLE_HANDLER_TRACKING)
 endif()
 
-option(NANO_ASAN_INT "Enable ASan+UBSan+Integer overflow" OFF)
-option(NANO_ASAN "Enable ASan+UBSan" OFF)
-option(NANO_TSAN "Enable TSan" OFF)
 option(NANO_SIMD_OPTIMIZATIONS
        "Enable CPU-specific SIMD optimizations (SSE/AVX or NEON, e.g.)" OFF)
 option(
@@ -216,49 +223,99 @@ endif()
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-set(USING_ASAN (NANO_ASAN OR RAIBLOCKS_ASAN))
-set(USING_ASAN_INT (NANO_ASAN_INT OR RAIBLOCKS_ASAN_INT))
-set(USING_TSAN (NANO_TSAN OR RAIBLOCKS_TSAN))
-
 find_package(Threads)
+
+# Sanitizers
+option(NANO_ASAN "Enable ASan" OFF)
+if(NANO_ASAN)
+  if(MSVC)
+    message(FATAL_ERROR "ASan is not supported on MSVC")
+  endif()
+
+  message(STATUS "Using Asan")
+  add_compile_options(-fsanitize=address)
+  add_link_options(-fsanitize=address)
+
+  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    add_compile_options(
+      "-fsanitize-ignorelist=${PROJECT_SOURCE_DIR}/sanitize_ignorelist_asan")
+    add_link_options(
+      "-fsanitize-ignorelist=${PROJECT_SOURCE_DIR}/sanitize_ignorelist_asan")
+  endif()
+
+  add_definitions(-DED25519_NO_INLINE_ASM)
+endif()
+
+option(NANO_ASAN_INT "Enable ASan+Integer overflow" OFF)
+if(NANO_ASAN_INT)
+  if(MSVC)
+    message(FATAL_ERROR "ASan+Integer overflow is not supported on MSVC")
+  endif()
+
+  message(STATUS "Using ASan+Integer overflow")
+  add_compile_options(-fsanitize=address,integer)
+  add_link_options(-fsanitize=address,integer)
+
+  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    add_compile_options(
+      "-fsanitize-ignorelist=${PROJECT_SOURCE_DIR}/sanitize_ignorelist_asan")
+    add_link_options(
+      "-fsanitize-ignorelist=${PROJECT_SOURCE_DIR}/sanitize_ignorelist_asan")
+  endif()
+
+  add_definitions(-DED25519_NO_INLINE_ASM)
+endif()
+
+option(NANO_UBSAN "Enable UBSan" OFF)
+if(NANO_UBSAN)
+  if(MSVC)
+    message(FATAL_ERROR "UBSan is not supported on MSVC")
+  endif()
+
+  message(STATUS "Using UBSan")
+  add_compile_options(-fsanitize=undefined)
+  add_link_options(-fsanitize=undefined)
+
+  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    add_compile_options(
+      "-fsanitize-ignorelist=${PROJECT_SOURCE_DIR}/sanitize_ignorelist_ubsan")
+    add_link_options(
+      "-fsanitize-ignorelist=${PROJECT_SOURCE_DIR}/sanitize_ignorelist_ubsan")
+  endif()
+
+  add_definitions(-DED25519_NO_INLINE_ASM)
+  add_definitions(-DROCKSDB_UBSAN_RUN)
+endif()
+
+option(NANO_TSAN "Enable TSan" OFF)
+if(NANO_TSAN)
+  if(MSVC)
+    message(FATAL_ERROR "TSan is not supported on MSVC")
+  endif()
+
+  message(STATUS "Using TSan")
+  add_compile_options(-fsanitize=thread)
+  add_link_options(-fsanitize=thread)
+
+  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    add_compile_options(
+      "-fsanitize-ignorelist=${PROJECT_SOURCE_DIR}/sanitize_ignorelist_tsan")
+    add_link_options(
+      "-fsanitize-ignorelist=${PROJECT_SOURCE_DIR}/sanitize_ignorelist_tsan")
+  endif()
+
+  add_definitions(-DED25519_NO_INLINE_ASM)
+endif()
+
+if(NANO_WARN_TO_ERR)
+  add_compile_options(-Werror -Wno-deprecated-declarations)
+endif()
 
 if(WIN32)
   find_library(PSAPI Psapi)
   add_definitions(-D_WIN32_WINNT=0x0600 -DWINVER=0x0600 -DMINIUPNP_STATICLIB
                   -D_CRT_SECURE_NO_WARNINGS -DNOGDI /EHsc)
-
-  if(${USING_TSAN}
-     OR ${USING_ASAN}
-     OR ${USING_ASAN_INT})
-    message(WARNING "Cannot use TSAN or ASAN on Windows, sanitizers ignored")
-  endif()
-
 else()
-  if(NANO_WARN_TO_ERR)
-    add_compile_options(-Werror -Wno-deprecated-declarations)
-  endif()
-
-  if((${USING_TSAN} AND ${USING_ASAN}) OR (${USING_TSAN} AND ${USING_ASAN_INT}))
-    message(WARNING "Cannot use TSAN/ASAN together, defaulting to ASAN")
-  endif()
-
-  if(${USING_ASAN} OR ${USING_ASAN_INT})
-    if(${USING_ASAN_INT})
-      add_compile_options(-fsanitize=address,undefined,integer)
-    else()
-      add_compile_options(-fsanitize=address,undefined)
-    endif()
-    add_definitions(-DED25519_NO_INLINE_ASM)
-    add_definitions(-DROCKSDB_UBSAN_RUN)
-  elseif(${USING_TSAN})
-    add_compile_options(-fsanitize=thread)
-    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-      add_compile_options(
-        "-fsanitize-blacklist=${PROJECT_SOURCE_DIR}/tsan_clang_blacklist")
-    endif()
-    add_definitions(-DED25519_NO_INLINE_ASM)
-  endif()
-
   if(NANO_FUZZER_TEST)
     add_compile_options(-fsanitize=fuzzer-no-link -fno-omit-frame-pointer)
     add_definitions(-DNANO_FUZZER_TEST)
@@ -320,20 +377,6 @@ else()
     set(PLATFORM_LINK_FLAGS "-static-libgcc -static-libstdc++")
   endif()
 
-  if(${USING_ASAN_INT})
-    set(PLATFORM_LINK_FLAGS
-        "${PLATFORM_LINK_FLAGS} -fsanitize=address,undefined,integer")
-  elseif(${USING_ASAN})
-    set(PLATFORM_LINK_FLAGS
-        "${PLATFORM_LINK_FLAGS} -fsanitize=address,undefined")
-  elseif(${USING_TSAN})
-    set(PLATFORM_LINK_FLAGS "${PLATFORM_LINK_FLAGS} -fsanitize=thread")
-    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-      set(PLATFORM_LINK_FLAGS
-          "${PLATFORM_LINK_FLAGS} -fsanitize-blacklist=${PROJECT_SOURCE_DIR}/tsan_clang_blacklist"
-      )
-    endif()
-  endif()
   if(NANO_FUZZER_TEST)
     set(PLATFORM_LINK_FLAGS "${PLATFORM_LINK_FLAGS} -fsanitize=fuzzer-no-link")
   endif()
@@ -450,21 +493,10 @@ include_directories(${BOOST_LIBRARY_INCLUDES})
 add_library(Boost::stacktrace ALIAS boost_stacktrace_basic)
 add_definitions(-DBOOST_STACKTRACE_GNU_SOURCE_NOT_REQUIRED)
 
-# Workaround for GitHub builders which do not appear to have the Windows Message
-# Compiler mc.exe
-add_definitions(-DBOOST_LOG_WITHOUT_EVENT_LOG)
-
 # Workaround for missing reference errata in the boost property_tree module
 target_link_libraries(boost_property_tree INTERFACE Boost::any)
 target_link_libraries(boost_property_tree INTERFACE Boost::format)
 target_link_libraries(boost_property_tree INTERFACE Boost::multi_index)
-
-# diskhash
-if(NOT CMAKE_SYSTEM_NAME STREQUAL "Windows")
-  add_library(diskhash STATIC
-              ${CMAKE_SOURCE_DIR}/submodules/diskhash/src/diskhash.c)
-  include_directories(submodules/diskhash/src)
-endif()
 
 # RocksDB
 include_directories(submodules/rocksdb/include)
@@ -491,30 +523,36 @@ set(WITH_TOOLS
     CACHE BOOL "" FORCE)
 if(ENABLE_AVX2)
   set(PORTABLE
-      OFF
+      0
       CACHE BOOL "" FORCE)
 else()
   set(PORTABLE
-      ON
+      1
       CACHE BOOL "" FORCE)
 endif()
-set(FAIL_ON_WARNINGS
-    OFF
-    CACHE BOOL "") # Ignore unreachable code warning in merging_iterator.cc
-                   # RocksDB v7.8.3 on Windows
-                   # https://github.com/facebook/rocksdb/issues/11072
 add_subdirectory(submodules/rocksdb EXCLUDE_FROM_ALL)
 
-include_directories(cpptoml/include)
+# cpptoml
+include_directories(submodules/cpptoml/include)
 
 # magic_enum
-include_directories(submodules/magic_enum/include)
+include_directories(submodules/magic_enum/include/magic_enum)
 
 add_subdirectory(crypto/ed25519-donna)
 
 add_subdirectory(nano/ipc_flatbuffers_lib)
 add_subdirectory(nano/ipc_flatbuffers_test)
 
+# fmt
+add_subdirectory(submodules/fmt EXCLUDE_FROM_ALL)
+include_directories(submodules/fmt/include)
+
+# spdlog
+add_definitions(-DSPDLOG_FMT_EXTERNAL)
+add_subdirectory(submodules/spdlog EXCLUDE_FROM_ALL)
+include_directories(submodules/spdlog/include)
+
+# miniupnp
 set(UPNPC_BUILD_SHARED
     OFF
     CACHE BOOL "")
@@ -547,7 +585,8 @@ endif()
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_definitions(-DCRYPTOPP_DISABLE_MIXED_ASM -DCRYPTOPP_DISABLE_ASM)
   message(
-    "CryptoPP with disabled ASM for ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}"
+    STATUS
+      "CryptoPP with disabled ASM for ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}"
   )
 endif()
 add_definitions(-DCRYPTOPP_DISABLE_SHANI)
@@ -650,6 +689,9 @@ target_compile_definitions(blake2 PRIVATE -D__SSE2__)
 
 add_subdirectory(nano/crypto_lib)
 add_subdirectory(nano/secure)
+add_subdirectory(nano/store)
+target_include_directories(nano_store PUBLIC ${BOOST_LIBRARY_INCLUDES})
+target_include_directories(nano_store PUBLIC submodules)
 add_subdirectory(nano/lib)
 add_subdirectory(nano/node)
 add_subdirectory(nano/nano_node)
@@ -725,6 +767,7 @@ endif()
 if(NANO_GUI OR RAIBLOCKS_GUI)
   install(FILES ${PROJECT_BINARY_DIR}/config-node.toml.sample DESTINATION .)
   install(FILES ${PROJECT_BINARY_DIR}/config-rpc.toml.sample DESTINATION .)
+  install(FILES ${PROJECT_BINARY_DIR}/config-log.toml.sample DESTINATION .)
   if(WIN32)
     set(PLATFORM_QT_PACKAGES WinExtras)
   else()
@@ -735,7 +778,6 @@ if(NANO_GUI OR RAIBLOCKS_GUI)
 
   add_library(qt nano/qt/qt.cpp nano/qt/qt.hpp)
   include_directories(${CMAKE_SOURCE_DIR}/submodules)
-  include_directories(${CMAKE_SOURCE_DIR}/submodules/cpptoml/include)
 
   target_link_libraries(
     qt
@@ -774,7 +816,7 @@ if(NANO_GUI OR RAIBLOCKS_GUI)
     nano_wallet ${PLATFORM_GUI_TARGET_PROPERTIES} ${PLATFORM_WALLET_SOURCE}
                 nano/nano_wallet/entry.cpp nano/nano_wallet/icon.hpp ${RES})
 
-  target_link_libraries(nano_wallet rpc node qt)
+  target_link_libraries(nano_wallet Boost::process rpc node qt)
 
   if(WIN32)
     target_link_libraries(nano_wallet Qt5::WinExtras)

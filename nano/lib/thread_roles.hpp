@@ -30,18 +30,28 @@ enum class name
 	state_block_signature_verification,
 	epoch_upgrader,
 	db_parallel_traversal,
-	election_scheduler,
 	unchecked,
 	backlog_population,
-	election_hinting,
 	vote_generator_queue,
 	bootstrap_server,
 	telemetry,
-	optimistic_scheduler,
 	ascending_bootstrap,
 	bootstrap_server_requests,
 	bootstrap_server_responses,
+	scheduler_hinted,
+	scheduler_manual,
+	scheduler_optimistic,
+	scheduler_priority,
+	rep_crawler,
+	local_block_broadcasting,
+	rep_tiers,
+	network_cleanup,
+	network_keepalive,
+	network_reachout,
+	signal_manager,
 };
+
+std::string_view to_string (name);
 
 /*
  * Get/Set the identifier for the current thread

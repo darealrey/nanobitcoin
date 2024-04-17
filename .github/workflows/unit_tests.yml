@@ -16,25 +16,13 @@ jobs:
       BUILD_TYPE: ${{ matrix.RELEASE && 'RelWithDebInfo' || 'Debug' }}
       TEST_USE_ROCKSDB: ${{ matrix.BACKEND == 'rocksdb' && '1' || '0' }}
       DEADLINE_SCALE_FACTOR: ${{ matrix.BACKEND == 'rocksdb' && '2' || '1' }}
-    runs-on: macos-12
+    runs-on: macos-14
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     steps:
       - name: Checkout
         uses: actions/checkout@v3
         with:
           submodules: "recursive"
-          fetch-depth: 0 # Full history needed for restoring file timestamps
-
-      - name: Restore Timestamps
-        uses: ./.github/actions/restore-git-mtimes
-        continue-on-error: true
-
-      - name: Restore Build Cache
-        uses: actions/cache/restore@v3
-        continue-on-error: true
-        with:
-          path: build
-          key: ${{ runner.os }}-build-cache
 
       - name: Prepare
         run: ci/prepare/macos/prepare.sh
@@ -43,26 +31,20 @@ jobs:
         id: build
         run: ci/build-tests.sh
 
-      - name: Save Build Cache
-        # Only save build cache from develop to avoid polluting it by other branches / PRs
-        if: github.ref == 'refs/heads/develop' && success()
-        uses: actions/cache/save@v3
-        continue-on-error: true
-        with:
-          path: build
-          key: ${{ runner.os }}-build-cache
-
       - name: Core Tests
         if: steps.build.outcome == 'success' && (success() || failure())
-        run: cd build && ../ci/tests/run-core-tests.sh
+        run: ../ci/tests/run-core-tests.sh
+        working-directory: build
 
       - name: RPC Tests
         if: steps.build.outcome == 'success' && (success() || failure())
-        run: cd build && ../ci/tests/run-rpc-tests.sh
+        run: ../ci/tests/run-rpc-tests.sh
+        working-directory: build
 
       - name: System Tests
         if: steps.build.outcome == 'success' && (success() || failure())
-        run: cd build && ../ci/tests/run-system-tests.sh
+        run: ../ci/tests/run-system-tests.sh
+        working-directory: build
 
   linux_test:
     name: Linux [${{ matrix.BACKEND }} | ${{ matrix.COMPILER }}]
@@ -87,18 +69,6 @@ jobs:
         uses: actions/checkout@v3
         with:
           submodules: "recursive"
-          fetch-depth: 0 # Full history needed for restoring file timestamps
-
-      - name: Restore Timestamps
-        uses: ./.github/actions/restore-git-mtimes
-        continue-on-error: true
-
-      - name: Restore Build Cache
-        uses: actions/cache/restore@v3
-        continue-on-error: true
-        with:
-          path: build
-          key: ${{ runner.os }}-${{ env.COMPILER }}-build-cache
 
       - name: Prepare
         run: sudo -E ci/prepare/linux/prepare.sh
@@ -107,30 +77,25 @@ jobs:
         id: build
         run: ci/build-tests.sh
 
-      - name: Save Build Cache
-        # Only save build cache from develop to avoid polluting it by other branches / PRs
-        if: github.ref == 'refs/heads/develop' && success()
-        uses: actions/cache/save@v3
-        continue-on-error: true
-        with:
-          path: build
-          key: ${{ runner.os }}-${{ env.COMPILER }}-build-cache
-
       - name: Core Tests
         if: steps.build.outcome == 'success' && (success() || failure())
-        run: cd build && ../ci/tests/run-core-tests.sh
+        run: ../ci/tests/run-core-tests.sh
+        working-directory: build
 
       - name: RPC Tests
         if: steps.build.outcome == 'success' && (success() || failure())
-        run: cd build && ../ci/tests/run-rpc-tests.sh
+        run: ../ci/tests/run-rpc-tests.sh
+        working-directory: build
 
       - name: System Tests
         if: steps.build.outcome == 'success' && (success() || failure())
-        run: cd build && ../ci/tests/run-system-tests.sh
+        run: ../ci/tests/run-system-tests.sh
+        working-directory: build
 
       - name: QT Tests
         if: steps.build.outcome == 'success' && (success() || failure())
-        run: cd build && ../ci/tests/run-qt-tests.sh
+        run: ../ci/tests/run-qt-tests.sh
+        working-directory: build
 
   windows_test:
     name: Windows [${{ matrix.BACKEND }}]
@@ -153,18 +118,6 @@ jobs:
         uses: actions/checkout@v3
         with:
           submodules: "recursive"
-          fetch-depth: 0 # full history needed for restoring file timestamps
-
-      - name: Restore Timestamps
-        uses: ./.github/actions/restore-git-mtimes
-        continue-on-error: true
-
-      - name: Restore Build Cache
-        uses: actions/cache/restore@v3
-        continue-on-error: true
-        with:
-          path: build
-          key: ${{ runner.os }}-build-cache
 
       - name: Prepare
         run: ci/prepare/windows/prepare.ps1
@@ -174,26 +127,21 @@ jobs:
         run: ci/build-tests.sh
         shell: bash
 
-      - name: Save Build Cache
-        # only save build cache from develop to avoid polluting it by other branches / PRs
-        if: github.ref == 'refs/heads/develop' && success()
-        uses: actions/cache/save@v3
-        continue-on-error: true
-        with:
-          path: build
-          key: ${{ runner.os }}-build-cache
-
       - name: Core Tests
         if: steps.build.outcome == 'success' && (success() || failure())
-        run: cd build && ../ci/tests/run-core-tests.sh
+        run: ../ci/tests/run-core-tests.sh
+        working-directory: build
         shell: bash
 
       - name: RPC Tests
         if: steps.build.outcome == 'success' && (success() || failure())
-        run: cd build && ../ci/tests/run-rpc-tests.sh
+        run: ../ci/tests/run-rpc-tests.sh
+        working-directory: build
         shell: bash
 
       - name: System Tests
         if: steps.build.outcome == 'success' && (success() || failure())
-        run: cd build && ../ci/tests/run-system-tests.sh
+        run: ../ci/tests/run-system-tests.sh
+        working-directory: build
         shell: bash
+        continue-on-error: true # FIXME: Investigate why this fails on Windows

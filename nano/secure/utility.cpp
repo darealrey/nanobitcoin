@@ -2,13 +2,22 @@
 #include <nano/secure/utility.hpp>
 #include <nano/secure/working.hpp>
 
-#include <boost/filesystem.hpp>
+#include <boost/system/error_code.hpp>
 
-static std::vector<boost::filesystem::path> all_unique_paths;
+#include <random>
 
-boost::filesystem::path nano::working_path (nano::networks network)
+static std::vector<std::filesystem::path> all_unique_paths;
+
+std::filesystem::path nano::working_path (nano::networks network)
 {
 	auto result (nano::app_path ());
+
+	if (auto path_override = nano::get_env ("NANO_APP_PATH"))
+	{
+		result = *path_override;
+		std::cerr << "Application path overridden by NANO_APP_PATH environment variable: " << result << std::endl;
+	}
+
 	switch (network)
 	{
 		case nano::networks::invalid:
@@ -30,9 +39,25 @@ boost::filesystem::path nano::working_path (nano::networks network)
 	return result;
 }
 
-boost::filesystem::path nano::unique_path (nano::networks network)
+std::filesystem::path nano::unique_path (nano::networks network)
 {
-	auto result (working_path (network) / boost::filesystem::unique_path ());
+	std::random_device rd;
+	std::mt19937 gen (rd ());
+	std::uniform_int_distribution<> dis (0, 15);
+
+	const char * hex_chars = "0123456789ABCDEF";
+	std::string random_string;
+	random_string.reserve (32);
+
+	for (int i = 0; i < 32; ++i)
+	{
+		random_string += hex_chars[dis (gen)];
+	}
+
+	auto result = working_path (network) / random_string;
+
+	std::filesystem::create_directories (result);
+
 	all_unique_paths.push_back (result);
 	return result;
 }
@@ -42,32 +67,10 @@ void nano::remove_temporary_directories ()
 	for (auto & path : all_unique_paths)
 	{
 		boost::system::error_code ec;
-		boost::filesystem::remove_all (path, ec);
+		std::filesystem::remove_all (path, ec);
 		if (ec)
 		{
 			std::cerr << "Could not remove temporary directory: " << ec.message () << std::endl;
 		}
-
-		// lmdb creates a -lock suffixed file for its MDB_NOSUBDIR databases
-		auto lockfile = path;
-		lockfile += "-lock";
-		boost::filesystem::remove (lockfile, ec);
-		if (ec)
-		{
-			std::cerr << "Could not remove temporary lock file: " << ec.message () << std::endl;
-		}
 	}
-}
-
-namespace nano
-{
-/** A wrapper for handling signals */
-std::function<void ()> signal_handler_impl;
-void signal_handler (int sig)
-{
-	if (signal_handler_impl != nullptr)
-	{
-		signal_handler_impl ();
-	}
-}
 }

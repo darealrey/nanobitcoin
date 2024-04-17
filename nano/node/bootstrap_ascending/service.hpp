@@ -21,13 +21,17 @@
 
 namespace mi = boost::multi_index;
 
+namespace nano::secure
+{
+class transaction;
+}
+
 namespace nano
 {
 class block_processor;
 class ledger;
 class network;
 class node_config;
-class transaction;
 
 namespace transport
 {
@@ -89,7 +93,7 @@ namespace bootstrap_ascending
 
 	private:
 		/* Inspects a block that has been processed by the block processor */
-		void inspect (nano::transaction const &, nano::process_return const & result, nano::block const & block);
+		void inspect (secure::transaction const &, nano::block_status const & result, nano::block const & block);
 
 		void throttle_if_needed (nano::unique_lock<nano::mutex> & lock);
 		void run ();
@@ -110,6 +114,7 @@ namespace bootstrap_ascending
 
 		void process (nano::asc_pull_ack::blocks_payload const & response, async_tag const & tag);
 		void process (nano::asc_pull_ack::account_info_payload const & response, async_tag const & tag);
+		void process (nano::asc_pull_ack::frontiers_payload const & response, async_tag const & tag);
 		void process (nano::empty_payload const & response, async_tag const & tag);
 
 		enum class verify_result

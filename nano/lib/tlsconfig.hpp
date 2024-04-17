@@ -11,14 +11,9 @@
 #include <boost/asio/ssl/context.hpp>
 #endif
 
-namespace boost::filesystem
-{
-class path;
-}
-
 namespace nano
 {
-class logger_mt;
+class logger;
 class jsonconfig;
 class tomlconfig;
 
@@ -59,5 +54,5 @@ public:
 #endif
 };
 
-nano::error read_tls_config_toml (boost::filesystem::path const & data_path_a, nano::tls_config & config_a, nano::logger_mt & logger_a, std::vector<std::string> const & config_overrides = std::vector<std::string> ());
+nano::error read_tls_config_toml (std::filesystem::path const & data_path_a, nano::tls_config & config_a, nano::logger &, std::vector<std::string> const & config_overrides = std::vector<std::string> ());
 }

@@ -1,6 +1,6 @@
 add_executable(
   core_test
-  core_test_main.cc
+  entry.cpp
   fakes/websocket_client.hpp
   fakes/work_peer.hpp
   active_transactions.cpp
@@ -12,8 +12,8 @@ add_executable(
   bootstrap_ascending.cpp
   bootstrap_server.cpp
   cli.cpp
-  confirmation_height.cpp
   confirmation_solicitor.cpp
+  confirming_set.cpp
   conflicts.cpp
   difficulty.cpp
   distributed_work.cpp
@@ -21,27 +21,30 @@ add_executable(
   election_scheduler.cpp
   enums.cpp
   epochs.cpp
+  fair_queue.cpp
   frontiers_confirmation.cpp
-  gap_cache.cpp
   ipc.cpp
   ledger.cpp
-  ledger_walker.cpp
+  ledger_confirm.cpp
   locks.cpp
-  logger.cpp
+  logging.cpp
   message.cpp
   message_deserializer.cpp
   memory_pool.cpp
   network.cpp
   network_filter.cpp
   node.cpp
+  object_stream.cpp
   optimistic_scheduler.cpp
   processing_queue.cpp
   processor_service.cpp
+  rep_crawler.cpp
+  receivable.cpp
   peer_container.cpp
-  prioritization.cpp
+  rep_weight_store.cpp
+  scheduler_buckets.cpp
   request_aggregator.cpp
   signal_manager.cpp
-  signing.cpp
   socket.cpp
   system.cpp
   telemetry.cpp
@@ -63,16 +66,7 @@ target_compile_definitions(
   core_test PRIVATE -DTAG_VERSION_STRING=${TAG_VERSION_STRING}
                     -DGIT_COMMIT_HASH=${GIT_COMMIT_HASH})
 
-target_link_libraries(
-  core_test
-  node
-  secure
-  test_common
-  gtest
-  libminiupnpc-static
-  Boost::log_setup
-  Boost::log)
+target_link_libraries(core_test test_common)
 
 include_directories(${CMAKE_SOURCE_DIR}/submodules)
-include_directories(${CMAKE_SOURCE_DIR}/submodules/cpptoml/include)
 include_directories(${CMAKE_SOURCE_DIR}/submodules/gtest/googletest/include)

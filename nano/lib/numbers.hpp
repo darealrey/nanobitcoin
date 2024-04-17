@@ -4,6 +4,7 @@
 #include <boost/multiprecision/cpp_int.hpp>
 
 #include <array>
+#include <ostream>
 
 namespace nano
 {
@@ -61,6 +62,7 @@ public:
 	using uint128_union::uint128_union;
 };
 class raw_key;
+
 class uint256_union
 {
 public:
@@ -257,7 +259,6 @@ nano::signature sign_message (nano::raw_key const &, nano::public_key const &, n
 nano::signature sign_message (nano::raw_key const &, nano::public_key const &, uint8_t const *, size_t);
 bool validate_message (nano::public_key const &, nano::uint256_union const &, nano::signature const &);
 bool validate_message (nano::public_key const &, uint8_t const *, size_t, nano::signature const &);
-bool validate_message_batch (unsigned char const **, size_t *, unsigned char const **, unsigned char const **, size_t, int *);
 nano::raw_key deterministic_key (nano::raw_key const &, uint32_t);
 nano::public_key pub_key (nano::raw_key const &);
 
@@ -265,6 +266,11 @@ nano::public_key pub_key (nano::raw_key const &);
 std::string to_string_hex (uint64_t const);
 std::string to_string_hex (uint16_t const);
 bool from_string_hex (std::string const &, uint64_t &);
+
+/* Printing adapters */
+std::ostream & operator<< (std::ostream & os, const uint128_union & val);
+std::ostream & operator<< (std::ostream & os, const uint256_union & val);
+std::ostream & operator<< (std::ostream & os, const uint512_union & val);
 
 /**
  * Convert a double to string in fixed format
@@ -381,6 +387,14 @@ struct hash<std::reference_wrapper<::nano::block_hash const>>
 	{
 		std::hash<::nano::block_hash> hash;
 		return hash (hash_a);
+	}
+};
+template <>
+struct hash<::nano::root>
+{
+	size_t operator() (::nano::root const & value_a) const
+	{
+		return std::hash<::nano::root> () (value_a);
 	}
 };
 }

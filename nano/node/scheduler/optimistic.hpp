@@ -22,9 +22,10 @@ namespace mi = boost::multi_index;
 
 namespace nano
 {
-class node;
-class ledger;
+class account_info;
 class active_transactions;
+class ledger;
+class node;
 }
 
 namespace nano::scheduler
@@ -44,6 +45,7 @@ public:
 	/** Maximum number of candidates stored in memory */
 	std::size_t max_size{ 1024 * 64 };
 };
+
 class optimistic final
 {
 	struct entry;
@@ -65,12 +67,14 @@ public:
 	 */
 	void notify ();
 
+	std::unique_ptr<container_info_component> collect_container_info (std::string const & name) const;
+
 private:
 	bool activate_predicate (nano::account_info const &, nano::confirmation_height_info const &) const;
 
 	bool predicate () const;
 	void run ();
-	void run_one (nano::transaction const &, entry const & candidate);
+	void run_one (secure::transaction const &, entry const & candidate);
 
 private: // Dependencies
 	optimistic_config const & config;

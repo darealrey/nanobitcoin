@@ -1,6 +1,13 @@
 #include <nano/lib/thread_roles.hpp>
 #include <nano/lib/utility.hpp>
 
+#include <magic_enum.hpp>
+
+std::string_view nano::thread_role::to_string (nano::thread_role::name name)
+{
+	return magic_enum::enum_name (name);
+}
+
 std::string nano::thread_role::get_string (nano::thread_role::name role)
 {
 	std::string thread_role_name_string;
@@ -70,17 +77,11 @@ std::string nano::thread_role::get_string (nano::thread_role::name role)
 		case nano::thread_role::name::db_parallel_traversal:
 			thread_role_name_string = "DB par traversl";
 			break;
-		case nano::thread_role::name::election_scheduler:
-			thread_role_name_string = "Election Sched";
-			break;
 		case nano::thread_role::name::unchecked:
 			thread_role_name_string = "Unchecked";
 			break;
 		case nano::thread_role::name::backlog_population:
 			thread_role_name_string = "Backlog";
-			break;
-		case nano::thread_role::name::election_hinting:
-			thread_role_name_string = "Hinting";
 			break;
 		case nano::thread_role::name::vote_generator_queue:
 			thread_role_name_string = "Voting que";
@@ -94,8 +95,38 @@ std::string nano::thread_role::get_string (nano::thread_role::name role)
 		case nano::thread_role::name::telemetry:
 			thread_role_name_string = "Telemetry";
 			break;
-		case nano::thread_role::name::optimistic_scheduler:
-			thread_role_name_string = "Optimistic";
+		case nano::thread_role::name::scheduler_hinted:
+			thread_role_name_string = "Sched Hinted";
+			break;
+		case nano::thread_role::name::scheduler_manual:
+			thread_role_name_string = "Sched Manual";
+			break;
+		case nano::thread_role::name::scheduler_optimistic:
+			thread_role_name_string = "Sched Opt";
+			break;
+		case nano::thread_role::name::scheduler_priority:
+			thread_role_name_string = "Sched Priority";
+			break;
+		case nano::thread_role::name::rep_crawler:
+			thread_role_name_string = "Rep Crawler";
+			break;
+		case nano::thread_role::name::local_block_broadcasting:
+			thread_role_name_string = "Local broadcast";
+			break;
+		case nano::thread_role::name::rep_tiers:
+			thread_role_name_string = "Rep tiers";
+			break;
+		case nano::thread_role::name::network_cleanup:
+			thread_role_name_string = "Net cleanup";
+			break;
+		case nano::thread_role::name::network_keepalive:
+			thread_role_name_string = "Net keepalive";
+			break;
+		case nano::thread_role::name::network_reachout:
+			thread_role_name_string = "Net reachout";
+			break;
+		case nano::thread_role::name::signal_manager:
+			thread_role_name_string = "Signal manager";
 			break;
 		default:
 			debug_assert (false && "nano::thread_role::get_string unhandled thread role");

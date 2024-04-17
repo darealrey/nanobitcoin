@@ -1,16 +1,14 @@
 #pragma once
 
-#include <nano/lib/errors.hpp>
 #include <nano/lib/locks.hpp>
 #include <nano/lib/timer.hpp>
 #include <nano/node/transport/channel.hpp>
-#include <nano/node/transport/transport.hpp>
+#include <nano/node/transport/fake.hpp>
+#include <nano/secure/account_info.hpp>
 
 #include <gtest/gtest.h>
 
 #include <boost/iostreams/concepts.hpp>
-#include <boost/log/sinks/text_ostream_backend.hpp>
-#include <boost/log/utility/setup/console.hpp>
 #include <boost/multiprecision/cpp_int.hpp>
 
 #include <atomic>
@@ -118,6 +116,46 @@
 		ASSERT_FALSE (condition);     \
 	}
 
+namespace nano::test
+{
+template <class... Ts>
+class start_stop_guard
+{
+public:
+	explicit start_stop_guard (Ts &... refs_a) :
+		refs{ std::forward<Ts &> (refs_a)... }
+	{
+		std::apply ([] (Ts &... refs) { (refs.start (), ...); }, refs);
+	}
+
+	~start_stop_guard ()
+	{
+		std::apply ([] (Ts &... refs) { (refs.stop (), ...); }, refs);
+	}
+
+private:
+	std::tuple<Ts &...> refs;
+};
+
+template <class... Ts>
+class stop_guard
+{
+public:
+	explicit stop_guard (Ts &... refs_a) :
+		refs{ std::forward<Ts &> (refs_a)... }
+	{
+	}
+
+	~stop_guard ()
+	{
+		std::apply ([] (Ts &... refs) { (refs.stop (), ...); }, refs);
+	}
+
+private:
+	std::tuple<Ts &...> refs;
+};
+}
+
 /* Convenience globals for gtest projects */
 namespace nano
 {
@@ -131,60 +169,13 @@ class network_params;
 class vote;
 class block;
 class election;
+class ledger;
 
 extern nano::uint128_t const & genesis_amount;
 
 namespace test
 {
 	class system;
-
-	class stringstream_mt_sink : public boost::iostreams::sink
-	{
-	public:
-		stringstream_mt_sink () = default;
-		stringstream_mt_sink (stringstream_mt_sink const & sink)
-		{
-			nano::lock_guard<nano::mutex> guard{ mutex };
-			ss << sink.ss.str ();
-		}
-
-		std::streamsize write (char const * string_to_write, std::streamsize size)
-		{
-			nano::lock_guard<nano::mutex> guard{ mutex };
-			ss << std::string (string_to_write, size);
-			return size;
-		}
-
-		std::string str ()
-		{
-			nano::lock_guard<nano::mutex> guard{ mutex };
-			return ss.str ();
-		}
-
-	private:
-		mutable nano::mutex mutex;
-		std::stringstream ss;
-	};
-
-	class boost_log_cerr_redirect
-	{
-	public:
-		boost_log_cerr_redirect (std::streambuf * new_buffer) :
-			old (std::cerr.rdbuf (new_buffer))
-		{
-			console_sink = (boost::log::add_console_log (std::cerr, boost::log::keywords::format = "%Message%"));
-		}
-
-		~boost_log_cerr_redirect ()
-		{
-			std::cerr.rdbuf (old);
-			boost::log::core::get ()->remove_sink (console_sink);
-		}
-
-	private:
-		std::streambuf * old;
-		boost::shared_ptr<boost::log::sinks::synchronous_sink<boost::log::sinks::text_ostream_backend>> console_sink;
-	};
 
 	class cout_redirect
 	{
@@ -284,28 +275,6 @@ namespace test
 		std::atomic<unsigned> required_count;
 	};
 
-	/**
-	 * A helper that calls `start` from constructor and `stop` from destructor
-	 */
-	template <class T>
-	class start_stop_guard
-	{
-	public:
-		explicit start_stop_guard (T & ref_a) :
-			ref{ ref_a }
-		{
-			ref.start ();
-		}
-
-		~start_stop_guard ()
-		{
-			ref.stop ();
-		}
-
-	private:
-		T & ref;
-	};
-
 	void wait_peer_connections (nano::test::system &);
 
 	/**
@@ -333,18 +302,6 @@ namespace test
 	 */
 	bool process_live (nano::node & node, std::vector<std::shared_ptr<nano::block>> blocks);
 	/*
-	 * Convenience function to confirm a list of blocks
-	 * The actual confirmation will happen asynchronously, check for that with `nano::test::confirmed (..)` function
-	 * @return true if successfully scheduled blocks to be confirmed
-	 */
-	bool confirm (nano::node & node, std::vector<std::shared_ptr<nano::block>> blocks);
-	/*
-	 * Convenience function to confirm a list of hashes
-	 * The actual confirmation will happen asynchronously, check for that with `nano::test::confirmed (..)` function
-	 * @return true if successfully scheduled blocks to be confirmed
-	 */
-	bool confirm (nano::node & node, std::vector<nano::block_hash> hashes);
-	/*
 	 * Convenience function to check whether a list of blocks is confirmed.
 	 * @return true if all blocks are confirmed, false otherwise
 	 */
@@ -364,6 +321,26 @@ namespace test
 	 * @return true if all blocks are fully processed and inserted in the ledger, false otherwise
 	 */
 	bool exists (nano::node & node, std::vector<std::shared_ptr<nano::block>> blocks);
+	/*
+	 * Convenience function to check whether *all* of the hashes exists in node ledger or in the pruned table.
+	 * @return true if all blocks are fully processed and inserted in the ledger, false otherwise
+	 */
+	bool block_or_pruned_all_exists (nano::node & node, std::vector<nano::block_hash> hashes);
+	/*
+	 * Convenience function to check whether *all* of the blocks exists in node ledger or their hash exists in the pruned table.
+	 * @return true if all blocks are fully processed and inserted in the ledger, false otherwise
+	 */
+	bool block_or_pruned_all_exists (nano::node & node, std::vector<std::shared_ptr<nano::block>> blocks);
+	/*
+	 * Convenience function to check whether *none* of the hashes exists in node ledger or in the pruned table.
+	 * @return true if none of the blocks are processed and inserted in the ledger, false otherwise
+	 */
+	bool block_or_pruned_none_exists (nano::node & node, std::vector<nano::block_hash> hashes);
+	/*
+	 * Convenience function to check whether *none* of the blocks exists in node ledger or their hash exists in the pruned table.
+	 * @return true if none of the blocks are processed and inserted in the ledger, false otherwise
+	 */
+	bool block_or_pruned_none_exists (nano::node & node, std::vector<std::shared_ptr<nano::block>> blocks);
 	/*
 	 * Convenience function to start elections for a list of hashes. Blocks are loaded from ledger.
 	 * @return true if all blocks exist and were queued to election scheduler
@@ -407,7 +384,7 @@ namespace test
 	/*
 	 * Creates a new fake channel associated with `node`
 	 */
-	std::shared_ptr<nano::transport::channel> fake_channel (nano::node & node, nano::account node_id = { 0 });
+	std::shared_ptr<nano::transport::fake::channel> fake_channel (nano::node & node, nano::account node_id = { 0 });
 	/*
 	 * Start an election on system system_a, node node_a and hash hash_a by reading the block
 	 * out of the ledger and adding it to the manual election scheduler queue.
@@ -419,14 +396,41 @@ namespace test
 	/*
 	 * Call start_election for every block identified in the hash vector.
 	 * Optionally, force confirm the election if forced_a is set.
-	 * NOTE: Each election is given 5 seconds to complete, if it does not complete in 5 seconds, it will assert.
+	 * @return true if all elections were successfully started
+	 * NOTE: Each election is given 5 seconds to complete, if it does not complete in 5 seconds, it will return an error
 	 */
-	void start_elections (nano::test::system &, nano::node &, std::vector<nano::block_hash> const &, bool const forced_a = false);
+	[[nodiscard]] bool start_elections (nano::test::system &, nano::node &, std::vector<nano::block_hash> const &, bool const forced_a = false);
 	/*
 	 * Call start_election for every block in the vector.
 	 * Optionally, force confirm the election if forced_a is set.
-	 * NOTE: Each election is given 5 seconds to complete, if it does not complete in 5 seconds, it will assert.
+	 * @return true if all elections were successfully started
+	 * NOTE: Each election is given 5 seconds to complete, if it does not complete in 5 seconds, it will return an error.
 	 */
-	void start_elections (nano::test::system &, nano::node &, std::vector<std::shared_ptr<nano::block>> const &, bool const forced_a = false);
+	[[nodiscard]] bool start_elections (nano::test::system &, nano::node &, std::vector<std::shared_ptr<nano::block>> const &, bool const forced_a = false);
+
+	/**
+	 *  Return account_info for account "acc", if account is not found, a default initialised object is returned
+	 */
+	nano::account_info account_info (nano::node const & node, nano::account const & acc);
+
+	/**
+	 * Return the account height, returns 0 on error
+	 */
+	uint64_t account_height (nano::node const & node, nano::account const & acc);
+
+	/**
+	 * \brief Debugging function to print all entries in the pending table. Intended to be used to debug unit tests.
+	 */
+	void print_all_receivable_entries (const nano::store::component & store);
+
+	/**
+	 * \brief Debugging function to print all accounts in a ledger. Intended to be used to debug unit tests.
+	 */
+	void print_all_account_info (const nano::ledger & ledger);
+
+	/**
+	 * \brief Debugging function to print all blocks in a node. Intended to be used to debug unit tests.
+	 */
+	void print_all_blocks (const nano::store::component & store);
 }
 }

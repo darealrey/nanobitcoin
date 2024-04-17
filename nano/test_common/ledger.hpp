@@ -1,13 +1,16 @@
 #pragma once
 
-#include <nano/lib/logger_mt.hpp>
+#include <nano/lib/logging.hpp>
 #include <nano/lib/stats.hpp>
-#include <nano/node/common.hpp>
+#include <nano/lib/work.hpp>
 #include <nano/secure/ledger.hpp>
 
 namespace nano
 {
-class store;
+namespace store
+{
+	class component;
+}
 namespace test
 {
 	namespace context
@@ -19,16 +22,18 @@ namespace test
 				Blocks must all return process_result::progress when processed */
 			ledger_context (std::deque<std::shared_ptr<nano::block>> && blocks = std::deque<std::shared_ptr<nano::block>>{});
 			nano::ledger & ledger ();
-			nano::store & store ();
+			nano::store::component & store ();
 			nano::stats & stats ();
 			std::deque<std::shared_ptr<nano::block>> const & blocks () const;
+			nano::work_pool & pool ();
 
 		private:
-			nano::logger_mt logger;
-			std::unique_ptr<nano::store> store_m;
+			nano::logger logger;
+			std::unique_ptr<nano::store::component> store_m;
 			nano::stats stats_m;
 			nano::ledger ledger_m;
 			std::deque<std::shared_ptr<nano::block>> blocks_m;
+			nano::work_pool pool_m;
 		};
 
 		/** Only a genesis block */

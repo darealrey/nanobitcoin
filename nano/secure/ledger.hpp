@@ -1,103 +1,121 @@
 #pragma once
 
-#include <nano/lib/rep_weights.hpp>
+#include <nano/lib/numbers.hpp>
 #include <nano/lib/timer.hpp>
-#include <nano/secure/common.hpp>
+#include <nano/secure/account_info.hpp>
+#include <nano/secure/generate_cache_flags.hpp>
+#include <nano/secure/ledger_cache.hpp>
+#include <nano/secure/pending_info.hpp>
+#include <nano/secure/transaction.hpp>
 
+#include <deque>
 #include <map>
+
+namespace nano::store
+{
+class component;
+}
 
 namespace nano
 {
-class store;
+class block;
+enum class block_status;
+enum class epoch : uint8_t;
+class ledger_constants;
+class pending_info;
+class pending_key;
 class stats;
-class write_transaction;
-
-// map of vote weight per block, ordered greater first
-using tally_t = std::map<nano::uint128_t, std::shared_ptr<nano::block>, std::greater<nano::uint128_t>>;
-
-class uncemented_info
-{
-public:
-	uncemented_info (nano::block_hash const & cemented_frontier, nano::block_hash const & frontier, nano::account const & account);
-	nano::block_hash cemented_frontier;
-	nano::block_hash frontier;
-	nano::account account;
-};
 
 class ledger final
 {
+	friend class receivable_iterator;
+
 public:
-	ledger (nano::store &, nano::stats &, nano::ledger_constants & constants, nano::generate_cache const & = nano::generate_cache ());
+	ledger (nano::store::component &, nano::stats &, nano::ledger_constants & constants, nano::generate_cache_flags const & = nano::generate_cache_flags{}, nano::uint128_t min_rep_weight_a = 0);
+
+	/** Start read-write transaction */
+	secure::write_transaction tx_begin_write (std::vector<nano::tables> const & tables_to_lock = {}, std::vector<nano::tables> const & tables_no_lock = {}) const;
+	/** Start read-only transaction */
+	secure::read_transaction tx_begin_read () const;
 	/**
-	 * Return account containing hash, expects that block hash exists in ledger
+	 * Returns the account for a given hash
+	 * Returns std::nullopt if the block doesn't exist or has been pruned
 	 */
-	nano::account account (nano::transaction const &, nano::block_hash const &) const;
-	std::optional<nano::account_info> account_info (nano::transaction const & transaction, nano::account const & account) const;
+	std::optional<nano::account> account (secure::transaction const &, nano::block_hash const &) const;
+	std::optional<nano::account_info> account_info (secure::transaction const & transaction, nano::account const & account) const;
+	std::optional<nano::uint128_t> amount (secure::transaction const &, nano::block_hash const &);
+	std::optional<nano::uint128_t> balance (secure::transaction const &, nano::block_hash const &) const;
+	std::shared_ptr<nano::block> block (secure::transaction const & transaction, nano::block_hash const & hash) const;
+	bool block_exists (secure::transaction const & transaction, nano::block_hash const & hash) const;
+	nano::uint128_t account_balance (secure::transaction const &, nano::account const &, bool = false) const;
+	nano::uint128_t account_receivable (secure::transaction const &, nano::account const &, bool = false);
 	/**
-	 * For non-prunning nodes same as `ledger::account()`
-	 * For prunning nodes ensures that block hash exists, otherwise returns zero account
+	 * Returns the cached vote weight for the given representative.
+	 * If the weight is below the cache limit it returns 0.
+	 * During bootstrap it returns the preconfigured bootstrap weights.
 	 */
-	nano::account account_safe (nano::transaction const &, nano::block_hash const &, bool &) const;
-	/**
-	 * Return account containing hash, returns zero account if account can not be found
-	 */
-	nano::account account_safe (nano::transaction const &, nano::block_hash const &) const;
-	nano::uint128_t amount (nano::transaction const &, nano::account const &);
-	nano::uint128_t amount (nano::transaction const &, nano::block_hash const &);
-	/** Safe for previous block, but block hash_a must exist */
-	nano::uint128_t amount_safe (nano::transaction const &, nano::block_hash const & hash_a, bool &) const;
-	nano::uint128_t balance (nano::transaction const &, nano::block_hash const &) const;
-	nano::uint128_t balance_safe (nano::transaction const &, nano::block_hash const &, bool &) const;
-	nano::uint128_t account_balance (nano::transaction const &, nano::account const &, bool = false);
-	nano::uint128_t account_receivable (nano::transaction const &, nano::account const &, bool = false);
-	nano::uint128_t weight (nano::account const &);
-	std::shared_ptr<nano::block> successor (nano::transaction const &, nano::qualified_root const &);
-	std::shared_ptr<nano::block> forked_block (nano::transaction const &, nano::block const &);
-	std::shared_ptr<nano::block> head_block (nano::transaction const &, nano::account const &);
-	bool block_confirmed (nano::transaction const &, nano::block_hash const &) const;
-	nano::block_hash latest (nano::transaction const &, nano::account const &);
-	nano::root latest_root (nano::transaction const &, nano::account const &);
-	nano::block_hash representative (nano::transaction const &, nano::block_hash const &);
-	nano::block_hash representative_calculated (nano::transaction const &, nano::block_hash const &);
+	nano::uint128_t weight (nano::account const &) const;
+	std::optional<nano::block_hash> successor (secure::transaction const &, nano::qualified_root const &) const noexcept;
+	std::optional<nano::block_hash> successor (secure::transaction const & transaction, nano::block_hash const & hash) const noexcept;
+	/* Returns the exact vote weight for the given representative by doing a database lookup */
+	nano::uint128_t weight_exact (secure::transaction const &, nano::account const &) const;
+	std::shared_ptr<nano::block> forked_block (secure::transaction const &, nano::block const &);
+	std::shared_ptr<nano::block> head_block (secure::transaction const &, nano::account const &);
+	bool block_confirmed (secure::transaction const &, nano::block_hash const &) const;
+	nano::block_hash latest (secure::transaction const &, nano::account const &);
+	nano::root latest_root (secure::transaction const &, nano::account const &);
+	nano::block_hash representative (secure::transaction const &, nano::block_hash const &);
+	nano::block_hash representative_calculated (secure::transaction const &, nano::block_hash const &);
 	bool block_or_pruned_exists (nano::block_hash const &) const;
-	bool block_or_pruned_exists (nano::transaction const &, nano::block_hash const &) const;
-	bool root_exists (nano::transaction const &, nano::root const &);
+	bool block_or_pruned_exists (secure::transaction const &, nano::block_hash const &) const;
 	std::string block_text (char const *);
 	std::string block_text (nano::block_hash const &);
-	bool is_send (nano::transaction const &, nano::block const &) const;
-	nano::account const & block_destination (nano::transaction const &, nano::block const &);
-	nano::block_hash block_source (nano::transaction const &, nano::block const &);
-	std::pair<nano::block_hash, nano::block_hash> hash_root_random (nano::transaction const &) const;
-	std::optional<nano::pending_info> pending_info (nano::transaction const & transaction, nano::pending_key const & key) const;
-	nano::process_return process (nano::write_transaction const &, nano::block &);
-	bool rollback (nano::write_transaction const &, nano::block_hash const &, std::vector<std::shared_ptr<nano::block>> &);
-	bool rollback (nano::write_transaction const &, nano::block_hash const &);
-	void update_account (nano::write_transaction const &, nano::account const &, nano::account_info const &, nano::account_info const &);
-	uint64_t pruning_action (nano::write_transaction &, nano::block_hash const &, uint64_t const);
+	std::pair<nano::block_hash, nano::block_hash> hash_root_random (secure::transaction const &) const;
+	std::optional<nano::pending_info> pending_info (secure::transaction const & transaction, nano::pending_key const & key) const;
+	std::deque<std::shared_ptr<nano::block>> confirm (secure::write_transaction const & transaction, nano::block_hash const & hash);
+	nano::block_status process (secure::write_transaction const & transaction, std::shared_ptr<nano::block> block);
+	bool rollback (secure::write_transaction const &, nano::block_hash const &, std::vector<std::shared_ptr<nano::block>> &);
+	bool rollback (secure::write_transaction const &, nano::block_hash const &);
+	void update_account (secure::write_transaction const &, nano::account const &, nano::account_info const &, nano::account_info const &);
+	uint64_t pruning_action (secure::write_transaction &, nano::block_hash const &, uint64_t const);
 	void dump_account_chain (nano::account const &, std::ostream & = std::cout);
-	bool could_fit (nano::transaction const &, nano::block const &) const;
-	bool dependents_confirmed (nano::transaction const &, nano::block const &) const;
+	bool dependents_confirmed (secure::transaction const &, nano::block const &) const;
 	bool is_epoch_link (nano::link const &) const;
-	std::array<nano::block_hash, 2> dependent_blocks (nano::transaction const &, nano::block const &) const;
-	std::shared_ptr<nano::block> find_receive_block_by_send_hash (nano::transaction const & transaction, nano::account const & destination, nano::block_hash const & send_block_hash);
+	std::array<nano::block_hash, 2> dependent_blocks (secure::transaction const &, nano::block const &) const;
+	std::shared_ptr<nano::block> find_receive_block_by_send_hash (secure::transaction const & transaction, nano::account const & destination, nano::block_hash const & send_block_hash);
 	nano::account const & epoch_signer (nano::link const &) const;
 	nano::link const & epoch_link (nano::epoch) const;
-	std::multimap<uint64_t, uncemented_info, std::greater<>> unconfirmed_frontiers () const;
-	bool migrate_lmdb_to_rocksdb (boost::filesystem::path const &) const;
+	bool migrate_lmdb_to_rocksdb (std::filesystem::path const &) const;
 	bool bootstrap_weight_reached () const;
+	static nano::epoch version (nano::block const & block);
+	nano::epoch version (secure::transaction const & transaction, nano::block_hash const & hash) const;
+	uint64_t height (secure::transaction const & transaction, nano::block_hash const & hash) const;
+	// Returns whether there are any receivable entries for 'account'
+	bool receivable_any (secure::transaction const & tx, nano::account const & account) const;
+	nano::receivable_iterator receivable_end () const;
+	// Returns the next receivable entry for an account greater than 'account'
+	nano::receivable_iterator receivable_upper_bound (secure::transaction const & tx, nano::account const & account) const;
+	// Returns the next receivable entry for the account 'account' with hash greater than 'hash'
+	nano::receivable_iterator receivable_upper_bound (secure::transaction const & tx, nano::account const & account, nano::block_hash const & hash) const;
+	std::unique_ptr<container_info_component> collect_container_info (std::string const & name) const;
+	uint64_t cemented_count () const;
+	uint64_t block_count () const;
+	uint64_t account_count () const;
+	uint64_t pruned_count () const;
 	static nano::uint128_t const unit;
 	nano::ledger_constants & constants;
-	nano::store & store;
+	nano::store::component & store;
 	nano::ledger_cache cache;
 	nano::stats & stats;
 	std::unordered_map<nano::account, nano::uint128_t> bootstrap_weights;
 	uint64_t bootstrap_weight_max_blocks{ 1 };
-	std::atomic<bool> check_bootstrap_weights;
+	mutable std::atomic<bool> check_bootstrap_weights;
 	bool pruning{ false };
 
 private:
-	void initialize (nano::generate_cache const &);
+	// Returns the next receivable entry equal or greater than 'key'
+	std::optional<std::pair<nano::pending_key, nano::pending_info>> receivable_lower_bound (secure::transaction const & tx, nano::account const & account, nano::block_hash const & hash) const;
+	void initialize (nano::generate_cache_flags const &);
+	void confirm (secure::write_transaction const & transaction, nano::block const & block);
 };
-
-std::unique_ptr<container_info_component> collect_container_info (ledger & ledger, std::string const & name);
 }
